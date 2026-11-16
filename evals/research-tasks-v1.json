@@ -1,0 +1,79 @@
+{
+  "version": "research-tasks-v1",
+  "label_status": "curated controlled-corpus task rubrics; pending independent human review",
+  "scope": "local-documents-only; synthetic products; not a web-research benchmark",
+  "thresholds": {
+    "citation_precision": 0.9,
+    "evidence_coverage": 0.6
+  },
+  "tasks": [
+    {
+      "id": "offline_selection",
+      "question": "仅根据资料，为单机离线、写入并发低的个人研究工具比较 Redwood 和 Cedar，给出选择、依据和主要限制，不编造性能数据。",
+      "documents": [
+        "fixtures/storage-options.md"
+      ],
+      "criteria": [
+        {
+          "id": "choice",
+          "description": "推荐 Redwood 用于给定单机离线场景。"
+        },
+        {
+          "id": "offline_reason",
+          "description": "说明 Redwood 可离线且不需要独立服务，Cedar 要求网络或独立服务。"
+        },
+        {
+          "id": "writer_limit",
+          "description": "明确提到 Redwood 同一文件最多一个写者的限制。"
+        },
+        {
+          "id": "no_invented_performance",
+          "description": "不编造吞吐量、延迟、数据丢失率或测量结果。"
+        }
+      ]
+    },
+    {
+      "id": "conflicting_sources",
+      "question": "仅根据两份 Atlas 2.0 资料，判断它是否支持进程重启恢复。处理同版本、同生效日期的冲突，给出可追溯说明，不强行得出支持或不支持的确定结论。",
+      "documents": [
+        "fixtures/atlas-guide.md",
+        "fixtures/atlas-release.md"
+      ],
+      "criteria": [
+        {
+          "id": "both_sides",
+          "description": "明确区分指南声称支持恢复、发布说明声称尚不支持。"
+        },
+        {
+          "id": "recognize_conflict",
+          "description": "说明两份资料同版本、同生效日期，存在无法单凭日期消解的冲突。"
+        },
+        {
+          "id": "abstain",
+          "description": "保留最终是否支持恢复的判断，建议进一步核实，不擅自选一份为真。"
+        }
+      ]
+    },
+    {
+      "id": "insufficient_evidence",
+      "question": "仅根据 Harbor 资料，能否保证工具在进程重启后 exactly-once 执行？说明已知能力与证据缺口，不把本地文件保存当成该保证。",
+      "documents": [
+        "fixtures/harbor-capabilities.md"
+      ],
+      "criteria": [
+        {
+          "id": "known_capability",
+          "description": "准确提到 Markdown 导出或本地 JSON 资料保存的已知能力。"
+        },
+        {
+          "id": "no_guarantee",
+          "description": "明确说明当前证据不能建立重启后 exactly-once 保证。"
+        },
+        {
+          "id": "separate_storage_and_semantics",
+          "description": "区分文件保存与工具幂等/恢复协议，不能由前者直接推出后者。"
+        }
+      ]
+    }
+  ]
+}

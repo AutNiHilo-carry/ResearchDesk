@@ -1,0 +1,38 @@
+{
+  "version": "research-tasks-v1",
+  "label_status": "new transfer cases frozen before first run; project-authored rubrics, pending independent human review; becomes development data after inspection",
+  "scope": "local-documents-only; synthetic products; version, condition and denominator transfer cases; not an independent held-out benchmark",
+  "thresholds": {"citation_precision": 0.9, "evidence_coverage": 0.6},
+  "tasks": [
+    {
+      "id": "version_scope",
+      "question": "仅根据 Lumen 两个版本的资料，判断能否给 Lumen 2.0 的有副作用工具开启超时自动重试。说明版本边界和仍需核实的内容。",
+      "documents": ["fixtures/lumen-versions.md"],
+      "criteria": [
+        {"id": "current_fact", "description": "准确给出 2.0 工具超时为20秒的已知设置。"},
+        {"id": "version_boundary", "description": "区分1.0的只读重试规则和2.0的资料，不能把旧版规则当作2.0已证实的能力。"},
+        {"id": "side_effect_uncertainty", "description": "不建议在当前证据下直接开启有副作用工具的自动重试，并明确2.0的幂等、回执或重试语义尚需核实；不把未说明当作能力不存在。"}
+      ]
+    },
+    {
+      "id": "conditional_capability",
+      "question": "仅根据资料，为完全离线的个人版部署判断 Aster 和 Birch 是否已经满足自动每日快照需求。保留套餐、网络和人工操作条件，说明下一步。",
+      "documents": ["fixtures/snapshot-conditions.md"],
+      "criteria": [
+        {"id": "aster_conditions", "description": "准确说明Aster每日自动快照限企业套餐且依赖云连接，不能推荐为已满足离线个人版需求。"},
+        {"id": "birch_manual", "description": "准确说明Birch个人版可离线手动导出，不能把手动导出等同已提供自动每日快照。"},
+        {"id": "neither_confirmed", "description": "结论为当前资料不能确认任何一个方案满足全部需求，建议核实或验证替代备份流程，不删掉离线或自动条件。"}
+      ]
+    },
+    {
+      "id": "metric_denominator",
+      "question": "仅根据 Sable 实验记录，分别计算研究任务成功率和工具尝试成功率，写清分子分母，并说明能否推断断电恢复率。不要混用任务数、工具调用数和重试次数。",
+      "documents": ["fixtures/sable-measurements.md"],
+      "criteria": [
+        {"id": "task_rate", "description": "研究任务成功率明确为90/100=90%，不能用工具调用作为任务分母。"},
+        {"id": "tool_rate", "description": "工具尝试成功率明确为110/120，约91.7%；分母包含重试尝试。"},
+        {"id": "no_recovery_claim", "description": "指出这次没有断电故障注入，恢复率未知或未测，不能从成功率推出断电恢复保证。"}
+      ]
+    }
+  ]
+}

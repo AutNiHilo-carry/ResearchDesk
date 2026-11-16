@@ -1,0 +1,101 @@
+{
+  "version": "inference-calibration-v1",
+  "contract": "scope-boundary-candidate-v1",
+  "recommended_judge_prompt": "v2",
+  "label_status": "project-authored provisional boundary references; pending independent human review",
+  "scope": "four minimal development cases after Q04 ambiguity; same conclusion, separate fictional source snapshots; not held-out",
+  "cases": [
+    {
+      "id": "R01",
+      "boundary_role": "applicable_explicit_denial",
+      "conclusion": "Larch个人版完全离线部署已满足自动快照要求。",
+      "kind": "synthesis",
+      "candidate_rationale": "仅关联本案例来源；来源是否适用、是否支持结论仍待验证。",
+      "premises": [
+        {
+          "statement": "Larch企业版联网部署支持自动快照；个人版或离线模式不支持此功能。",
+          "source": "Larch企业版联网部署支持自动快照；个人版或离线模式不支持此功能。",
+          "quote": "Larch企业版联网部署支持自动快照；个人版或离线模式不支持此功能。"
+        }
+      ],
+      "reference": {
+        "support": {
+          "P1": "supported"
+        },
+        "scope": "consistent",
+        "inference": "invalid",
+        "strength": "overstated",
+        "reason_review_question": "来源明确描述目标条件并否定能力；是否把来源适用但结论被否定误标成来源不适用？"
+      }
+    },
+    {
+      "id": "R02",
+      "boundary_role": "explicit_other_domain",
+      "conclusion": "Larch个人版完全离线部署已满足自动快照要求。",
+      "kind": "synthesis",
+      "candidate_rationale": "仅关联本案例来源；来源是否适用、是否支持结论仍待验证。",
+      "premises": [
+        {
+          "statement": "Larch企业版联网部署支持自动快照。本条仅适用于企业版联网部署，不说明个人版或离线行为。",
+          "source": "Larch企业版联网部署支持自动快照。本条仅适用于企业版联网部署，不说明个人版或离线行为。",
+          "quote": "Larch企业版联网部署支持自动快照。本条仅适用于企业版联网部署，不说明个人版或离线行为。"
+        }
+      ],
+      "reference": {
+        "support": {
+          "P1": "supported"
+        },
+        "scope": "inconsistent",
+        "inference": "invalid",
+        "strength": "overstated",
+        "reason_review_question": "来源声明只适用于企业版联网，不能将能力迁移到个人离线；是否同时识别范围迁移与无效推断？"
+      }
+    },
+    {
+      "id": "R03",
+      "boundary_role": "applicable_explicit_affirmation",
+      "conclusion": "Larch个人版完全离线部署已满足自动快照要求。",
+      "kind": "synthesis",
+      "candidate_rationale": "仅关联本案例来源；来源是否适用、是否支持结论仍待验证。",
+      "premises": [
+        {
+          "statement": "Larch个人版完全离线部署支持自动快照。",
+          "source": "Larch个人版完全离线部署支持自动快照。",
+          "quote": "Larch个人版完全离线部署支持自动快照。"
+        }
+      ],
+      "reference": {
+        "support": {
+          "P1": "supported"
+        },
+        "scope": "consistent",
+        "inference": "valid",
+        "strength": "within_evidence",
+        "reason_review_question": "目标条件与来源一致且能力被肯定；是否避免因其他案例的否定资料而误判？"
+      }
+    },
+    {
+      "id": "R04",
+      "boundary_role": "unspecified_applicability",
+      "conclusion": "Larch个人版完全离线部署已满足自动快照要求。",
+      "kind": "synthesis",
+      "candidate_rationale": "仅关联本案例来源；来源是否适用、是否支持结论仍待验证。",
+      "premises": [
+        {
+          "statement": "Larch支持自动快照，当前资料没有说明适用套餐和网络条件。",
+          "source": "Larch支持自动快照，当前资料没有说明适用套餐和网络条件。",
+          "quote": "Larch支持自动快照，当前资料没有说明适用套餐和网络条件。"
+        }
+      ],
+      "reference": {
+        "support": {
+          "P1": "supported"
+        },
+        "scope": "uncertain",
+        "inference": "uncertain",
+        "strength": "overstated",
+        "reason_review_question": "来源未说明适用条件；是否保留范围未知，而非当成明确不适用或已经满足？"
+      }
+    }
+  ]
+}

@@ -1,0 +1,267 @@
+{
+  "version": "clause-scope-structural-v1",
+  "reference_status": "engineering_structural_reference_not_semantic_gold",
+  "human_review": "pending",
+  "cases": [
+    {
+      "id": "numeric-wal",
+      "text": "只有一个 WAL 文件[E1]。读写可并行[E2]。",
+      "expected_units": {
+        "clause-spans-v1": 1,
+        "clause-spans-v2": 2,
+        "clause-spans-v3": 2
+      },
+      "expected_v3_citations": [
+        [
+          "E1"
+        ],
+        [
+          "E2"
+        ]
+      ]
+    },
+    {
+      "id": "numeric-connection",
+      "text": "只有1个连接[E1]；另一个库独立[E2]。",
+      "expected_units": {
+        "clause-spans-v1": 1,
+        "clause-spans-v2": 2,
+        "clause-spans-v3": 2
+      },
+      "expected_v3_citations": [
+        [
+          "E1"
+        ],
+        [
+          "E2"
+        ]
+      ]
+    },
+    {
+      "id": "availability-time",
+      "text": "只有一个连接可用时，执行写入；第二阶段开始。",
+      "expected_units": {
+        "clause-spans-v1": 1,
+        "clause-spans-v2": 2,
+        "clause-spans-v3": 1
+      }
+    },
+    {
+      "id": "completion-after",
+      "text": "只有一个线程完成后，启动下一阶段；状态另行记录。",
+      "expected_units": {
+        "clause-spans-v1": 1,
+        "clause-spans-v2": 2,
+        "clause-spans-v3": 1
+      }
+    },
+    {
+      "id": "completion-before",
+      "text": "只有一个进程退出前，保留资源；清理另行处理。",
+      "expected_units": {
+        "clause-spans-v1": 1,
+        "clause-spans-v2": 2,
+        "clause-spans-v3": 1
+      }
+    },
+    {
+      "id": "when-then",
+      "text": "只有当内存足够时才执行；其余等待。",
+      "expected_units": {
+        "clause-spans-v1": 1,
+        "clause-spans-v2": 1,
+        "clause-spans-v3": 1
+      }
+    },
+    {
+      "id": "resource-then",
+      "text": "只有一个连接可用才执行；其余等待。",
+      "expected_units": {
+        "clause-spans-v1": 1,
+        "clause-spans-v2": 1,
+        "clause-spans-v3": 1
+      }
+    },
+    {
+      "id": "resource-otherwise",
+      "text": "只有一个连接可用；否则退出。",
+      "expected_units": {
+        "clause-spans-v1": 1,
+        "clause-spans-v2": 1,
+        "clause-spans-v3": 1
+      }
+    },
+    {
+      "id": "other-condition",
+      "text": "只有一个 WAL 文件；如果写入失败则恢复。",
+      "expected_units": {
+        "clause-spans-v1": 1,
+        "clause-spans-v2": 1,
+        "clause-spans-v3": 1
+      }
+    },
+    {
+      "id": "unknown-noun",
+      "text": "只有一个管理员；其他用户等待。",
+      "expected_units": {
+        "clause-spans-v1": 1,
+        "clause-spans-v2": 1,
+        "clause-spans-v3": 1
+      }
+    },
+    {
+      "id": "unknown-quantity",
+      "text": "只有两个连接；第三个须等待。",
+      "expected_units": {
+        "clause-spans-v1": 1,
+        "clause-spans-v2": 1,
+        "clause-spans-v3": 1
+      }
+    },
+    {
+      "id": "english-condition",
+      "text": "Only when memory is available can it run; otherwise stop.",
+      "expected_units": {
+        "clause-spans-v1": 1,
+        "clause-spans-v2": 1,
+        "clause-spans-v3": 1
+      }
+    },
+    {
+      "id": "explicit-references",
+      "text": "事实A[E1]；事实B[E2]。",
+      "expected_units": {
+        "clause-spans-v1": 2,
+        "clause-spans-v2": 2,
+        "clause-spans-v3": 2
+      },
+      "expected_v3_citations": [
+        [
+          "E1"
+        ],
+        [
+          "E2"
+        ]
+      ]
+    },
+    {
+      "id": "parent-final-pool",
+      "text": "事实A；事实B。[E1]",
+      "expected_units": {
+        "clause-spans-v1": 2,
+        "clause-spans-v2": 2,
+        "clause-spans-v3": 2
+      },
+      "expected_v3_citations": [
+        [
+          "E1"
+        ],
+        [
+          "E1"
+        ]
+      ]
+    },
+    {
+      "id": "single-final-reference-ambiguous",
+      "text": "写者不干扰读者；但只有一个 WAL 文件[E1]。",
+      "expected_units": {
+        "clause-spans-v1": 1,
+        "clause-spans-v2": 2,
+        "clause-spans-v3": 2
+      },
+      "expected_v3_citations": [
+        [
+          "E1"
+        ],
+        [
+          "E1"
+        ]
+      ],
+      "expected_v3_direct_citations": [
+        [],
+        [
+          "E1"
+        ]
+      ],
+      "expected_v3_bindings": [
+        "parent_final_candidate_pool",
+        "parent_final_candidate_pool"
+      ]
+    },
+    {
+      "id": "time-quantity-not-condition",
+      "text": "同一时间只有一个写入者[E1]。另一个事实[E2]。",
+      "expected_units": {
+        "clause-spans-v1": 1,
+        "clause-spans-v2": 2,
+        "clause-spans-v3": 2
+      },
+      "expected_v3_citations": [
+        [
+          "E1"
+        ],
+        [
+          "E2"
+        ]
+      ]
+    },
+    {
+      "id": "quoted-semicolon",
+      "text": "示例为“A；B”；事实C。",
+      "expected_units": {
+        "clause-spans-v1": 2,
+        "clause-spans-v2": 2,
+        "clause-spans-v3": 2
+      },
+      "expected_v3_citations": [
+        [],
+        []
+      ]
+    },
+    {
+      "id": "code-semicolon",
+      "text": "代码为`A;B`；事实C。",
+      "expected_units": {
+        "clause-spans-v1": 2,
+        "clause-spans-v2": 2,
+        "clause-spans-v3": 2
+      },
+      "expected_v3_citations": [
+        [],
+        []
+      ]
+    },
+    {
+      "id": "mixed-references-uncited-scope",
+      "text": "读写并行[E2]。写者不干扰读者；但只有一个 WAL 文件[E1]。",
+      "expected_units": {
+        "clause-spans-v1": 1,
+        "clause-spans-v2": 3,
+        "clause-spans-v3": 3
+      },
+      "expected_v3_citations": [
+        [
+          "E2"
+        ],
+        [],
+        [
+          "E1"
+        ]
+      ],
+      "expected_v3_direct_citations": [
+        [
+          "E2"
+        ],
+        [],
+        [
+          "E1"
+        ]
+      ],
+      "expected_v3_bindings": [
+        "explicit_span_only",
+        "explicit_span_only",
+        "explicit_span_only"
+      ]
+    }
+  ]
+}

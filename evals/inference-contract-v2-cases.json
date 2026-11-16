@@ -1,0 +1,223 @@
+{
+  "version": "inference-calibration-v1",
+  "contract": "inference-scope-contract-v2",
+  "recommended_judge_prompt": "v2",
+  "label_status": "project-authored candidate references under proposed v2; pending independent review",
+  "scope": "new development cases authored after observed v1 disagreements; frozen before paid v2 trial; not held-out",
+  "cases": [
+    {
+      "id": "Q01",
+      "topic": "explicit_version",
+      "conclusion": "两份 Nacre 7.2 文档对该版本恢复能力的陈述相反。",
+      "kind": "synthesis",
+      "candidate_rationale": "待验证的前提关联，不代表已完成判定。",
+      "premises": [
+        {
+          "statement": "Nacre 7.2 文档A，生效日2026-10-15：支持进程重启恢复。",
+          "source": "Nacre 7.2 文档A，生效日2026-10-15：支持进程重启恢复。",
+          "quote": "Nacre 7.2 文档A，生效日2026-10-15：支持进程重启恢复。"
+        },
+        {
+          "statement": "Nacre 7.2 文档B，生效日2026-10-15：尚不支持进程重启恢复。",
+          "source": "Nacre 7.2 文档B，生效日2026-10-15：尚不支持进程重启恢复。",
+          "quote": "Nacre 7.2 文档B，生效日2026-10-15：尚不支持进程重启恢复。"
+        }
+      ],
+      "reference": {
+        "support": {
+          "P1": "supported",
+          "P2": "supported"
+        },
+        "scope": "consistent",
+        "inference": "valid",
+        "strength": "within_evidence",
+        "reason_review_question": "请依v2合同分别检查显式适用范围、逻辑推断和结论强度，确认理由没有编造资料事实。"
+      }
+    },
+    {
+      "id": "Q02",
+      "topic": "equal_date_not_equal_version",
+      "conclusion": "这两份同版本 Nacre 7.2 文档对恢复能力的陈述相反。",
+      "kind": "synthesis",
+      "candidate_rationale": "待验证的前提关联，不代表已完成判定。",
+      "premises": [
+        {
+          "statement": "Nacre 6.0 文档A，生效日2026-10-15：支持进程重启恢复。",
+          "source": "Nacre 6.0 文档A，生效日2026-10-15：支持进程重启恢复。",
+          "quote": "Nacre 6.0 文档A，生效日2026-10-15：支持进程重启恢复。"
+        },
+        {
+          "statement": "Nacre 7.2 文档B，生效日2026-10-15：尚不支持进程重启恢复。",
+          "source": "Nacre 7.2 文档B，生效日2026-10-15：尚不支持进程重启恢复。",
+          "quote": "Nacre 7.2 文档B，生效日2026-10-15：尚不支持进程重启恢复。"
+        }
+      ],
+      "reference": {
+        "support": {
+          "P1": "supported",
+          "P2": "supported"
+        },
+        "scope": "inconsistent",
+        "inference": "invalid",
+        "strength": "overstated",
+        "reason_review_question": "请依v2合同分别检查显式适用范围、逻辑推断和结论强度，确认理由没有编造资料事实。"
+      }
+    },
+    {
+      "id": "Q03",
+      "topic": "legitimate_cross_version_comparison",
+      "conclusion": "资料分别说明 Ibis 1.0 导出CSV、4.0导出JSON；不能据1.0资料确认4.0已提供CSV导出。",
+      "kind": "synthesis",
+      "candidate_rationale": "待验证的前提关联，不代表已完成判定。",
+      "premises": [
+        {
+          "statement": "Ibis 1.0 资料只说明该版本支持导出CSV。",
+          "source": "Ibis 1.0 资料只说明该版本支持导出CSV。",
+          "quote": "Ibis 1.0 资料只说明该版本支持导出CSV。"
+        },
+        {
+          "statement": "Ibis 4.0 资料只说明该版本支持导出JSON，未说明CSV。",
+          "source": "Ibis 4.0 资料只说明该版本支持导出JSON，未说明CSV。",
+          "quote": "Ibis 4.0 资料只说明该版本支持导出JSON，未说明CSV。"
+        }
+      ],
+      "reference": {
+        "support": {
+          "P1": "supported",
+          "P2": "supported"
+        },
+        "scope": "consistent",
+        "inference": "valid",
+        "strength": "within_evidence",
+        "reason_review_question": "请依v2合同分别检查显式适用范围、逻辑推断和结论强度，确认理由没有编造资料事实。"
+      }
+    },
+    {
+      "id": "Q04",
+      "topic": "explicit_condition_mismatch",
+      "conclusion": "Flint个人版完全离线部署已满足自动快照要求。",
+      "kind": "synthesis",
+      "candidate_rationale": "待验证的前提关联，不代表已完成判定。",
+      "premises": [
+        {
+          "statement": "Flint企业版连接云端时支持自动快照；个人版或离线模式不支持此功能。",
+          "source": "Flint企业版连接云端时支持自动快照；个人版或离线模式不支持此功能。",
+          "quote": "Flint企业版连接云端时支持自动快照；个人版或离线模式不支持此功能。"
+        }
+      ],
+      "reference": {
+        "support": {
+          "P1": "supported"
+        },
+        "scope": "inconsistent",
+        "inference": "invalid",
+        "strength": "overstated",
+        "reason_review_question": "请依v2合同分别检查显式适用范围、逻辑推断和结论强度，确认理由没有编造资料事实。"
+      }
+    },
+    {
+      "id": "Q05",
+      "topic": "bounded_abstention",
+      "conclusion": "仅凭当前 Vela 资料不足以建立重启后工具不重复执行的保证。",
+      "kind": "abstention",
+      "candidate_rationale": "待验证的前提关联，不代表已完成判定。",
+      "premises": [
+        {
+          "statement": "当前Vela资料只说明文本导出，未说明幂等键、工具回执或恢复协议。",
+          "source": "当前Vela资料只说明文本导出，未说明幂等键、工具回执或恢复协议。",
+          "quote": "当前Vela资料只说明文本导出，未说明幂等键、工具回执或恢复协议。"
+        }
+      ],
+      "reference": {
+        "support": {
+          "P1": "supported"
+        },
+        "scope": "consistent",
+        "inference": "valid",
+        "strength": "within_evidence",
+        "reason_review_question": "请依v2合同分别检查显式适用范围、逻辑推断和结论强度，确认理由没有编造资料事实。"
+      }
+    },
+    {
+      "id": "Q06",
+      "topic": "same_product_epistemic_overreach",
+      "conclusion": "Vela产品肯定不具备任何幂等键、工具回执或恢复协议。",
+      "kind": "synthesis",
+      "candidate_rationale": "待验证的前提关联，不代表已完成判定。",
+      "premises": [
+        {
+          "statement": "当前Vela资料只说明文本导出，未说明幂等键、工具回执或恢复协议。",
+          "source": "当前Vela资料只说明文本导出，未说明幂等键、工具回执或恢复协议。",
+          "quote": "当前Vela资料只说明文本导出，未说明幂等键、工具回执或恢复协议。"
+        }
+      ],
+      "reference": {
+        "support": {
+          "P1": "supported"
+        },
+        "scope": "consistent",
+        "inference": "invalid",
+        "strength": "overstated",
+        "reason_review_question": "请依v2合同分别检查显式适用范围、逻辑推断和结论强度，确认理由没有编造资料事实。"
+      }
+    },
+    {
+      "id": "Q07",
+      "topic": "correct_measurement_unit",
+      "conclusion": "本次工具尝试成功率为42/50，即84%。",
+      "kind": "synthesis",
+      "candidate_rationale": "待验证的前提关联，不代表已完成判定。",
+      "premises": [
+        {
+          "statement": "本次成功完成18个研究任务，共20个研究任务。",
+          "source": "本次成功完成18个研究任务，共20个研究任务。",
+          "quote": "本次成功完成18个研究任务，共20个研究任务。"
+        },
+        {
+          "statement": "本次工具成功42次，共尝试50次；尝试数包含重试。",
+          "source": "本次工具成功42次，共尝试50次；尝试数包含重试。",
+          "quote": "本次工具成功42次，共尝试50次；尝试数包含重试。"
+        }
+      ],
+      "reference": {
+        "support": {
+          "P1": "supported",
+          "P2": "supported"
+        },
+        "scope": "consistent",
+        "inference": "valid",
+        "strength": "within_evidence",
+        "reason_review_question": "请依v2合同分别检查显式适用范围、逻辑推断和结论强度，确认理由没有编造资料事实。"
+      }
+    },
+    {
+      "id": "Q08",
+      "topic": "wrong_measurement_unit",
+      "conclusion": "本次工具尝试成功率为18/20，即90%。",
+      "kind": "synthesis",
+      "candidate_rationale": "待验证的前提关联，不代表已完成判定。",
+      "premises": [
+        {
+          "statement": "本次成功完成18个研究任务，共20个研究任务。",
+          "source": "本次成功完成18个研究任务，共20个研究任务。",
+          "quote": "本次成功完成18个研究任务，共20个研究任务。"
+        },
+        {
+          "statement": "本次工具成功42次，共尝试50次；尝试数包含重试。",
+          "source": "本次工具成功42次，共尝试50次；尝试数包含重试。",
+          "quote": "本次工具成功42次，共尝试50次；尝试数包含重试。"
+        }
+      ],
+      "reference": {
+        "support": {
+          "P1": "supported",
+          "P2": "supported"
+        },
+        "scope": "inconsistent",
+        "inference": "invalid",
+        "strength": "overstated",
+        "reason_review_question": "请依v2合同分别检查显式适用范围、逻辑推断和结论强度，确认理由没有编造资料事实。"
+      }
+    }
+  ]
+}

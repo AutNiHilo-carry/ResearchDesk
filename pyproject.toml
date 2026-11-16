@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "researchdesk"
+version = "0.1.0"
+description = "Evidence-first long-running research agent built on Deep Agents"
+requires-python = ">=3.11"
+dependencies = [
+  "deepagents==0.7.32",
+  "langchain-deepseek==1.1.1",
+  "httpx>=0.27,<1",
+  "python-dotenv>=1,<2",
+  "pydantic>=2.7,<3",
+  "langgraph-checkpoint-sqlite==3.1.3",
+]
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+[project.scripts]
+researchdesk = "researchdesk.cli:main"
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/researchdesk"]
+

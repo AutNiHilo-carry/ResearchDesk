@@ -1,0 +1,215 @@
+{
+  "version": "inference-calibration-v1",
+  "label_status": "project-authored candidate labels, pending independent human review",
+  "scope": "synthetic development calibration pairs; not a held-out benchmark or quality claim",
+  "cases": [
+    {
+      "id": "version_same",
+      "pair_id": "version_scope",
+      "conclusion": "两个 Orion 2.0 文档对该版本重启恢复的陈述冲突。",
+      "kind": "synthesis",
+      "candidate_rationale": "候选前提关联，尚未进行语义核查。",
+      "premises": [
+        {
+          "statement": "Orion 2.0 使用指南称：Orion 2.0 支持进程重启恢复。",
+          "source": "Orion 2.0 使用指南称：Orion 2.0 支持进程重启恢复。",
+          "quote": "Orion 2.0 使用指南称：Orion 2.0 支持进程重启恢复。"
+        },
+        {
+          "statement": "Orion 2.0 发布说明称：Orion 2.0 尚不支持进程重启恢复。",
+          "source": "Orion 2.0 发布说明称：Orion 2.0 尚不支持进程重启恢复。",
+          "quote": "Orion 2.0 发布说明称：Orion 2.0 尚不支持进程重启恢复。"
+        }
+      ],
+      "reference": {
+        "support": {
+          "P1": "supported",
+          "P2": "supported"
+        },
+        "scope": "consistent",
+        "inference": "valid",
+        "strength": "within_evidence",
+        "reason_review_question": "理由是否识别两处明确的2.0版本，而非错误地声称版本来自日期推断？"
+      }
+    },
+    {
+      "id": "version_different",
+      "pair_id": "version_scope",
+      "conclusion": "两个 Orion 2.0 文档对该版本重启恢复的陈述冲突。",
+      "kind": "synthesis",
+      "candidate_rationale": "候选前提关联，尚未进行语义核查。",
+      "premises": [
+        {
+          "statement": "Orion 1.0 使用指南称：Orion 1.0 支持进程重启恢复。",
+          "source": "Orion 1.0 使用指南称：Orion 1.0 支持进程重启恢复。",
+          "quote": "Orion 1.0 使用指南称：Orion 1.0 支持进程重启恢复。"
+        },
+        {
+          "statement": "Orion 2.0 发布说明称：Orion 2.0 尚不支持进程重启恢复。",
+          "source": "Orion 2.0 发布说明称：Orion 2.0 尚不支持进程重启恢复。",
+          "quote": "Orion 2.0 发布说明称：Orion 2.0 尚不支持进程重启恢复。"
+        }
+      ],
+      "reference": {
+        "support": {
+          "P1": "supported",
+          "P2": "supported"
+        },
+        "scope": "inconsistent",
+        "inference": "invalid",
+        "strength": "overstated",
+        "reason_review_question": "理由是否识别1.0与2.0的范围差异，而不是仅因陈述相反就宣布同版本冲突？"
+      }
+    },
+    {
+      "id": "condition_preserved",
+      "pair_id": "deployment_conditions",
+      "conclusion": "Aster 企业套餐联网部署具备资料所述的自动每日快照能力。",
+      "kind": "synthesis",
+      "candidate_rationale": "候选前提关联，尚未进行语义核查。",
+      "premises": [
+        {
+          "statement": "Aster 的自动每日快照仅适用于企业套餐，且必须连接云端。",
+          "source": "Aster 的自动每日快照仅适用于企业套餐，且必须连接云端。",
+          "quote": "Aster 的自动每日快照仅适用于企业套餐，且必须连接云端。"
+        }
+      ],
+      "reference": {
+        "support": {
+          "P1": "supported"
+        },
+        "scope": "consistent",
+        "inference": "valid",
+        "strength": "within_evidence",
+        "reason_review_question": "理由是否同时保留企业套餐与联网两项条件？"
+      }
+    },
+    {
+      "id": "condition_dropped",
+      "pair_id": "deployment_conditions",
+      "conclusion": "Aster 个人套餐完全离线部署已满足自动每日快照需求。",
+      "kind": "synthesis",
+      "candidate_rationale": "候选前提关联，尚未进行语义核查。",
+      "premises": [
+        {
+          "statement": "Aster 的自动每日快照仅适用于企业套餐，且必须连接云端。",
+          "source": "Aster 的自动每日快照仅适用于企业套餐，且必须连接云端。",
+          "quote": "Aster 的自动每日快照仅适用于企业套餐，且必须连接云端。"
+        }
+      ],
+      "reference": {
+        "support": {
+          "P1": "supported"
+        },
+        "scope": "inconsistent",
+        "inference": "invalid",
+        "strength": "overstated",
+        "reason_review_question": "理由是否指出套餐与网络条件均不匹配，避免将企业联网能力泛化到个人离线？"
+      }
+    },
+    {
+      "id": "absence_abstention",
+      "pair_id": "absence_vs_product",
+      "conclusion": "仅凭这份资料无法建立 Harbor 工具跨进程 exactly-once 执行的保证。",
+      "kind": "synthesis",
+      "candidate_rationale": "候选前提关联，尚未进行语义核查。",
+      "premises": [
+        {
+          "statement": "Harbor 资料只说明报告导出与JSON保存，未说明幂等键、工具回执或恢复协议。",
+          "source": "Harbor 资料只说明报告导出与JSON保存，未说明幂等键、工具回执或恢复协议。",
+          "quote": "Harbor 资料只说明报告导出与JSON保存，未说明幂等键、工具回执或恢复协议。"
+        }
+      ],
+      "reference": {
+        "support": {
+          "P1": "supported"
+        },
+        "scope": "consistent",
+        "inference": "valid",
+        "strength": "within_evidence",
+        "reason_review_question": "理由是否判断资料能建立什么保证，而不宣称产品确定缺少相关能力？"
+      }
+    },
+    {
+      "id": "absence_product_negative",
+      "pair_id": "absence_vs_product",
+      "conclusion": "Harbor 产品绝不具备幂等或跨进程恢复能力。",
+      "kind": "synthesis",
+      "candidate_rationale": "候选前提关联，尚未进行语义核查。",
+      "premises": [
+        {
+          "statement": "Harbor 资料只说明报告导出与JSON保存，未说明幂等键、工具回执或恢复协议。",
+          "source": "Harbor 资料只说明报告导出与JSON保存，未说明幂等键、工具回执或恢复协议。",
+          "quote": "Harbor 资料只说明报告导出与JSON保存，未说明幂等键、工具回执或恢复协议。"
+        }
+      ],
+      "reference": {
+        "support": {
+          "P1": "supported"
+        },
+        "scope": "consistent",
+        "inference": "invalid",
+        "strength": "overstated",
+        "reason_review_question": "理由是否区分未说明与不存在，拒绝从文档缺失推出产品能力的绝对否定？"
+      }
+    },
+    {
+      "id": "denominator_preserved",
+      "pair_id": "metric_denominator",
+      "conclusion": "本次工具尝试成功率为110/120，约91.7%。",
+      "kind": "synthesis",
+      "candidate_rationale": "候选前提关联，尚未进行语义核查。",
+      "premises": [
+        {
+          "statement": "本次完成90个研究任务，共100个研究任务。",
+          "source": "本次完成90个研究任务，共100个研究任务。",
+          "quote": "本次完成90个研究任务，共100个研究任务。"
+        },
+        {
+          "statement": "本次工具成功110次、总尝试120次，总尝试已经包含重试。",
+          "source": "本次工具成功110次、总尝试120次，总尝试已经包含重试。",
+          "quote": "本次工具成功110次、总尝试120次，总尝试已经包含重试。"
+        }
+      ],
+      "reference": {
+        "support": {
+          "P1": "supported",
+          "P2": "supported"
+        },
+        "scope": "consistent",
+        "inference": "valid",
+        "strength": "within_evidence",
+        "reason_review_question": "理由是否使用工具尝试的110/120，而不是研究任务的90/100？"
+      }
+    },
+    {
+      "id": "denominator_mixed",
+      "pair_id": "metric_denominator",
+      "conclusion": "本次工具尝试成功率为90/100，即90%。",
+      "kind": "synthesis",
+      "candidate_rationale": "候选前提关联，尚未进行语义核查。",
+      "premises": [
+        {
+          "statement": "本次完成90个研究任务，共100个研究任务。",
+          "source": "本次完成90个研究任务，共100个研究任务。",
+          "quote": "本次完成90个研究任务，共100个研究任务。"
+        },
+        {
+          "statement": "本次工具成功110次、总尝试120次，总尝试已经包含重试。",
+          "source": "本次工具成功110次、总尝试120次，总尝试已经包含重试。",
+          "quote": "本次工具成功110次、总尝试120次，总尝试已经包含重试。"
+        }
+      ],
+      "reference": {
+        "support": {
+          "P1": "supported",
+          "P2": "supported"
+        },
+        "scope": "consistent",
+        "inference": "invalid",
+        "strength": "overstated",
+        "reason_review_question": "理由是否识别任务数与工具尝试数的分母混用？"
+      }
+    }
+  ]
+}

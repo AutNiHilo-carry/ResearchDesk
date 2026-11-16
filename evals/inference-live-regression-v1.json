@@ -1,0 +1,273 @@
+{
+  "version": "inference-live-regression-v1",
+  "payload": {
+    "scope": "explicit_selected_units_only_not_whole_report",
+    "selected_units": [
+      "U6"
+    ],
+    "task_question": "仅根据两份 Atlas 2.0 资料，判断它是否支持进程重启恢复。处理同版本、同生效日期的冲突，给出可追溯说明，不强行得出支持或不支持的确定结论。\n仅使用附带的本地资料，不进行外部检索。正文控制在200字以内。每个事实单独一行并紧跟完整证据引用，纯建议和证据不足声明单独成行。至少记录并引用一条资料中可确认的事实。",
+    "trace_sha256": "b7574fd184d745fdce7c311a3ebba7e42bd8c703f53fad54d995152a48db0c23",
+    "run_snapshot_sha256": "284b1acc321f3f1352451d4b05a4f1841c29b3b9dbf834d8157c575071d9a3d4",
+    "report_units": [
+      {
+        "unit_id": "U1",
+        "line": 1,
+        "text": "## 报告",
+        "citations": []
+      },
+      {
+        "unit_id": "U2",
+        "line": 3,
+        "text": "**研究问题**：现有资料能否确认 Atlas 2.0 支持进程重启后恢复未完成的研究任务。",
+        "citations": []
+      },
+      {
+        "unit_id": "U3",
+        "line": 5,
+        "text": "- 使用指南称：Atlas 2.0 支持在进程重启后恢复未完成的研究任务。[E7377f1618e936fff]",
+        "citations": [
+          "E7377f1618e936fff"
+        ]
+      },
+      {
+        "unit_id": "U4",
+        "line": 6,
+        "text": "- 发布说明称：Atlas 2.0 尚未提供进程重启后的任务恢复能力。[E376764a496386c95]",
+        "citations": [
+          "E376764a496386c95"
+        ]
+      },
+      {
+        "unit_id": "U5",
+        "line": 7,
+        "text": "- 使用指南标注的资料生效日期为 2026-11-01。[Eb918b8b729571a5a]",
+        "citations": [
+          "Eb918b8b729571a5a"
+        ]
+      },
+      {
+        "unit_id": "U6",
+        "line": 8,
+        "text": "- 发布说明标注的资料生效日期同为 2026-11-01，二者同版本、同生效日期，二者说法直接冲突。[E33f1f26fdbda5928]",
+        "citations": [
+          "E33f1f26fdbda5928"
+        ]
+      },
+      {
+        "unit_id": "U7",
+        "line": 9,
+        "text": "- 使用指南未提供故障注入验证结果，因此缺少可用于判定冲突一方的验证证据。[Eb3e5b2ec90c2c235]",
+        "citations": [
+          "Eb3e5b2ec90c2c235"
+        ]
+      },
+      {
+        "unit_id": "U8",
+        "line": 10,
+        "text": "- 发布说明表示没有解释与同版本使用指南之间的差异，因此冲突无法从资料内部自行澄清。[E94aaf6956c38c6d7]",
+        "citations": [
+          "E94aaf6956c38c6d7"
+        ]
+      },
+      {
+        "unit_id": "U9",
+        "line": 11,
+        "text": "- 证据不足：现有资料不足以判定 Atlas 2.0 实际是否具备重启恢复能力，不给出“支持”或“不支持”的确定结论。",
+        "citations": []
+      },
+      {
+        "unit_id": "U10",
+        "line": 13,
+        "text": "**建议**：就上述冲突向资料发布方确认以哪份文档为准，并取得故障注入验证记录；在新证据出现前，按“能力未确认”安排使用与测试。",
+        "citations": []
+      },
+      {
+        "unit_id": "U11",
+        "line": 15,
+        "text": "**限制**：本文仅依据上述两份资料；两条相反表述均为各自文档的陈述，未被任何一方验证。",
+        "citations": []
+      }
+    ],
+    "conclusions": [
+      {
+        "unit_id": "U6",
+        "text": "- 发布说明标注的资料生效日期同为 2026-11-01，二者同版本、同生效日期，二者说法直接冲突。[E33f1f26fdbda5928]",
+        "kind": "synthesis",
+        "premises": [
+          {
+            "id": "P1",
+            "statement": "资料生效日期：2026-11-01。",
+            "evidence_ids": [
+              "Eb918b8b729571a5a"
+            ]
+          },
+          {
+            "id": "P2",
+            "statement": "资料生效日期：2026-11-01。",
+            "evidence_ids": [
+              "E33f1f26fdbda5928"
+            ]
+          },
+          {
+            "id": "P3",
+            "statement": "Atlas 2.0 支持在进程重启后恢复未完成的研究任务。",
+            "evidence_ids": [
+              "E7377f1618e936fff"
+            ]
+          },
+          {
+            "id": "P4",
+            "statement": "Atlas 2.0 尚未提供进程重启后的任务恢复能力。",
+            "evidence_ids": [
+              "E376764a496386c95"
+            ]
+          }
+        ],
+        "rationale": "Agent-proposed mapping of two dates and two opposing source statements; applicability and inference validity remain unverified."
+      }
+    ],
+    "evidence": {
+      "E33f1f26fdbda5928": {
+        "id": "E33f1f26fdbda5928",
+        "claim": "发布说明标注的资料生效日期为 2026-11-01。",
+        "source_id": "S216ef5dab01311c4",
+        "snippet": "资料生效日期：2026-11-01。",
+        "location": "C:\\Users\\pankesdsa\\Desktop\\PR2\\runs\\report-evaluations\\f5e7e6bc0fb346afb0a9a11430f2c0cf\\execution\\v2\\corpus\\03-atlas-release.md",
+        "retrieved_at": "2026-11-11T06:52:58.982573+00:00",
+        "recorded_at": "2026-11-11T06:53:10.754170+00:00",
+        "verification": "exact_quote_only"
+      },
+      "E376764a496386c95": {
+        "id": "E376764a496386c95",
+        "claim": "Atlas 2.0 发布说明称，Atlas 2.0 尚未提供进程重启后的任务恢复能力。",
+        "source_id": "S216ef5dab01311c4",
+        "snippet": "Atlas 2.0 尚未提供进程重启后的任务恢复能力。",
+        "location": "C:\\Users\\pankesdsa\\Desktop\\PR2\\runs\\report-evaluations\\f5e7e6bc0fb346afb0a9a11430f2c0cf\\execution\\v2\\corpus\\03-atlas-release.md",
+        "retrieved_at": "2026-11-11T06:52:58.982573+00:00",
+        "recorded_at": "2026-11-11T06:53:08.811679+00:00",
+        "verification": "exact_quote_only"
+      },
+      "E7377f1618e936fff": {
+        "id": "E7377f1618e936fff",
+        "claim": "Atlas 2.0 使用指南称，Atlas 2.0 支持进程重启后恢复未完成的研究任务。",
+        "source_id": "Sbfa3390fa2a71dc6",
+        "snippet": "Atlas 2.0 支持在进程重启后恢复未完成的研究任务。",
+        "location": "C:\\Users\\pankesdsa\\Desktop\\PR2\\runs\\report-evaluations\\f5e7e6bc0fb346afb0a9a11430f2c0cf\\execution\\v2\\corpus\\02-atlas-guide.md",
+        "retrieved_at": "2026-11-11T06:52:58.977556+00:00",
+        "recorded_at": "2026-11-11T06:53:08.775780+00:00",
+        "verification": "exact_quote_only"
+      },
+      "Eb918b8b729571a5a": {
+        "id": "Eb918b8b729571a5a",
+        "claim": "使用指南标注的资料生效日期为 2026-11-01。",
+        "source_id": "Sbfa3390fa2a71dc6",
+        "snippet": "资料生效日期：2026-11-01。",
+        "location": "C:\\Users\\pankesdsa\\Desktop\\PR2\\runs\\report-evaluations\\f5e7e6bc0fb346afb0a9a11430f2c0cf\\execution\\v2\\corpus\\02-atlas-guide.md",
+        "retrieved_at": "2026-11-11T06:52:58.977556+00:00",
+        "recorded_at": "2026-11-11T06:53:10.734047+00:00",
+        "verification": "exact_quote_only"
+      }
+    },
+    "sources": {
+      "S216ef5dab01311c4": {
+        "id": "S216ef5dab01311c4",
+        "title": "03-atlas-release.md",
+        "location": "C:\\Users\\pankesdsa\\Desktop\\PR2\\runs\\report-evaluations\\f5e7e6bc0fb346afb0a9a11430f2c0cf\\execution\\v2\\corpus\\03-atlas-release.md",
+        "content": "# 虚构评测资料：Atlas 2.0 发布说明\n资料生效日期：2026-11-01。\nAtlas 2.0 尚未提供进程重启后的任务恢复能力。\n本说明没有解释与同版本使用指南之间的差异。\n\n",
+        "kind": "local",
+        "retrieved_at": "2026-11-11T06:52:58.982573+00:00",
+        "sha256": "216ef5dab01311c4c795f0ec78d7d46e20d3786b64e34a1daa7fe5b14fd326d2"
+      },
+      "Sbfa3390fa2a71dc6": {
+        "id": "Sbfa3390fa2a71dc6",
+        "title": "02-atlas-guide.md",
+        "location": "C:\\Users\\pankesdsa\\Desktop\\PR2\\runs\\report-evaluations\\f5e7e6bc0fb346afb0a9a11430f2c0cf\\execution\\v2\\corpus\\02-atlas-guide.md",
+        "content": "# 虚构评测资料：Atlas 2.0 使用指南\n资料生效日期：2026-11-01。\nAtlas 2.0 支持在进程重启后恢复未完成的研究任务。\n本指南没有提供故障注入验证结果。\n\n",
+        "kind": "local",
+        "retrieved_at": "2026-11-11T06:52:58.977556+00:00",
+        "sha256": "bfa3390fa2a71dc62ab39efb3eb7925e8445a1c1b02843aa8f65a964f926dd74"
+      }
+    }
+  },
+  "references": {
+    "U6": {
+      "support": {
+        "P1": "supported",
+        "P2": "supported",
+        "P3": "supported",
+        "P4": "supported"
+      },
+      "scope": "consistent",
+      "inference": "valid",
+      "strength": "within_evidence",
+      "reason_review_question": "理由是否错误地声称“同版本”仅由同日期推断，而忽略两处明确的Atlas 2.0版本陈述？"
+    }
+  },
+  "observed_output": {
+    "units": [
+      {
+        "unit_id": "U6",
+        "premises": [
+          {
+            "premise_id": "P1",
+            "support": "supported",
+            "anchors": [
+              {
+                "evidence_id": "Eb918b8b729571a5a",
+                "quote": "资料生效日期：2026-11-01。"
+              }
+            ],
+            "reason": "使用指南片段明确标注该生效日期"
+          },
+          {
+            "premise_id": "P2",
+            "support": "supported",
+            "anchors": [
+              {
+                "evidence_id": "E33f1f26fdbda5928",
+                "quote": "资料生效日期：2026-11-01。"
+              }
+            ],
+            "reason": "发布说明片段明确标注同一生效日期"
+          },
+          {
+            "premise_id": "P3",
+            "support": "supported",
+            "anchors": [
+              {
+                "evidence_id": "E7377f1618e936fff",
+                "quote": "Atlas 2.0 支持在进程重启后恢复未完成的研究任务。"
+              }
+            ],
+            "reason": "使用指南原文陈述该能力"
+          },
+          {
+            "premise_id": "P4",
+            "support": "supported",
+            "anchors": [
+              {
+                "evidence_id": "E376764a496386c95",
+                "quote": "Atlas 2.0 尚未提供进程重启后的任务恢复能力。"
+              }
+            ],
+            "reason": "发布说明原文陈述相反能力"
+          }
+        ],
+        "scope": "consistent",
+        "inference": "valid",
+        "strength": "within_evidence",
+        "reason": "两日期相同且两陈述相反，冲突判断在证据范围内；但“同版本”仅由同生效日期推断，属隐含假设，结论强度略需注意"
+      }
+    ]
+  },
+  "origin": {
+    "request_id": "report-policy-u6-v1-20261111",
+    "raw_file_sha256": "55059abd90d309629bbcb82e18dfb501880cbb93b0a166831ff3d37cf83284cd",
+    "assessment": "archived real model output; reference labels are project-authored candidates, not independent human labels"
+  },
+  "known_rationale_issue": {
+    "analysis_origin": "agent_assisted_engineering_diagnosis_not_human_annotation",
+    "description": "模型正向标签与理由中的保留存在张力；理由声称版本仅由日期推断，但两份来源标题及能力摘录均写明Atlas 2.0。",
+    "reason_review": "pending_independent_review"
+  }
+}

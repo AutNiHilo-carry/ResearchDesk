@@ -1,0 +1,280 @@
+{
+  "version": "evidence-v2",
+  "label_status": "curated regression references; not independently human-reviewed; not held-out",
+  "cases": [
+    {
+      "id": "compound_missing_fact",
+      "claim": "系统支持日志；系统支持自动备份。",
+      "quotes": [
+        "系统支持日志。"
+      ],
+      "expected_factual": true,
+      "expected_verdicts": [
+        "partial"
+      ],
+      "clauses": [
+        {
+          "text": "系统支持日志；",
+          "factual": true,
+          "verdicts": [
+            "supported"
+          ]
+        },
+        {
+          "text": "系统支持自动备份。",
+          "factual": true,
+          "verdicts": [
+            "unsupported"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "compound_two_sources",
+      "claim": "产品支持功能A；产品支持功能B。",
+      "quotes": [
+        "产品支持功能A。",
+        "产品支持功能B。"
+      ],
+      "expected_factual": true,
+      "expected_verdicts": [
+        "partial",
+        "partial"
+      ],
+      "clauses": [
+        {
+          "text": "产品支持功能A；",
+          "factual": true,
+          "verdicts": [
+            "supported",
+            "unsupported"
+          ]
+        },
+        {
+          "text": "产品支持功能B。",
+          "factual": true,
+          "verdicts": [
+            "unsupported",
+            "supported"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "missing_measurements",
+      "claim": "没有实测基准，无法量化该负载下的吞吐量。",
+      "quotes": [],
+      "expected_factual": false,
+      "expected_verdicts": [],
+      "clauses": [
+        {
+          "text": "没有实测基准，无法量化该负载下的吞吐量。",
+          "factual": false,
+          "verdicts": []
+        }
+      ]
+    },
+    {
+      "id": "unverified_workload",
+      "claim": "个人工具的写入频率是否触及瓶颈，尚未取得数据支持。",
+      "quotes": [],
+      "expected_factual": false,
+      "expected_verdicts": [],
+      "clauses": [
+        {
+          "text": "个人工具的写入频率是否触及瓶颈，尚未取得数据支持。",
+          "factual": false,
+          "verdicts": []
+        }
+      ]
+    },
+    {
+      "id": "mixed_disclaimer_and_fact",
+      "claim": "尚未验证性能；系统支持自动恢复。",
+      "quotes": [],
+      "expected_factual": true,
+      "expected_verdicts": [],
+      "clauses": [
+        {
+          "text": "尚未验证性能；",
+          "factual": false,
+          "verdicts": []
+        },
+        {
+          "text": "系统支持自动恢复。",
+          "factual": true,
+          "verdicts": []
+        }
+      ]
+    },
+    {
+      "id": "fact_inside_disclaimer",
+      "claim": "**未验证**：系统支持自动恢复，但尚未进行测试。",
+      "quotes": [],
+      "expected_factual": true,
+      "expected_verdicts": [],
+      "clauses": [
+        {
+          "text": "**未验证**：系统支持自动恢复，但尚未进行测试。",
+          "factual": true,
+          "verdicts": []
+        }
+      ]
+    },
+    {
+      "id": "explicit_scenario",
+      "claim": "假设部署在一台机器上，先做小规模实验。",
+      "quotes": [],
+      "expected_factual": false,
+      "expected_verdicts": [],
+      "clauses": [
+        {
+          "text": "假设部署在一台机器上，先做小规模实验。",
+          "factual": false,
+          "verdicts": []
+        }
+      ]
+    },
+    {
+      "id": "recommendation_and_number",
+      "claim": "建议选择A；A的请求上限为8。",
+      "quotes": [
+        "A的请求上限为8。"
+      ],
+      "expected_factual": true,
+      "expected_verdicts": [
+        "supported"
+      ],
+      "clauses": [
+        {
+          "text": "建议选择A；",
+          "factual": false,
+          "verdicts": [
+            "not_applicable"
+          ]
+        },
+        {
+          "text": "A的请求上限为8。",
+          "factual": true,
+          "verdicts": [
+            "supported"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "version_scope",
+      "claim": "2.0版本支持插件。",
+      "quotes": [
+        "1.0版本支持插件。"
+      ],
+      "expected_factual": true,
+      "expected_verdicts": [
+        "insufficient"
+      ],
+      "clauses": [
+        {
+          "text": "2.0版本支持插件。",
+          "factual": true,
+          "verdicts": [
+            "insufficient"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "conditional_scope",
+      "claim": "只有在内存不少于4GB时，模式A才可用；模式B可用。",
+      "quotes": [
+        "只有在内存不少于4GB时，模式A才可用；模式B可用。"
+      ],
+      "expected_factual": true,
+      "expected_verdicts": [
+        "supported"
+      ],
+      "clauses": [
+        {
+          "text": "只有在内存不少于4GB时，模式A才可用；模式B可用。",
+          "factual": true,
+          "verdicts": [
+            "supported"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "url_and_number",
+      "claim": "服务地址为https://example.org/v1.2?a=1;b=2；请求上限为8。",
+      "quotes": [
+        "服务地址为https://example.org/v1.2?a=1;b=2；请求上限为8。"
+      ],
+      "expected_factual": true,
+      "expected_verdicts": [
+        "supported"
+      ],
+      "clauses": [
+        {
+          "text": "服务地址为https://example.org/v1.2?a=1;b=2；",
+          "factual": true,
+          "verdicts": [
+            "supported"
+          ]
+        },
+        {
+          "text": "请求上限为8。",
+          "factual": true,
+          "verdicts": [
+            "supported"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "quoted_semicolon",
+      "claim": "文档的示例文本是“A；B”；系统支持日志。",
+      "quotes": [
+        "文档的示例文本是“A；B”；系统支持日志。"
+      ],
+      "expected_factual": true,
+      "expected_verdicts": [
+        "supported"
+      ],
+      "clauses": [
+        {
+          "text": "文档的示例文本是“A；B”；",
+          "factual": true,
+          "verdicts": [
+            "supported"
+          ]
+        },
+        {
+          "text": "系统支持日志。",
+          "factual": true,
+          "verdicts": [
+            "supported"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "conjunction_unsplit",
+      "claim": "产品同时支持功能A和功能B。",
+      "quotes": [
+        "产品支持功能A。"
+      ],
+      "expected_factual": true,
+      "expected_verdicts": [
+        "partial"
+      ],
+      "clauses": [
+        {
+          "text": "产品同时支持功能A和功能B。",
+          "factual": true,
+          "verdicts": [
+            "partial"
+          ]
+        }
+      ]
+    }
+  ]
+}
