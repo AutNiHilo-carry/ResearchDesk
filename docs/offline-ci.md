@@ -21,7 +21,7 @@ pytest失败不会因随后演示通过而使任务成功。若项目安装成�
 
 不注入模型或搜索Secret，两项API环境变量为空。测试与演示使用固定资料/测试桩；包下载、Actions服务及归档仍需要网络，并可能消耗Actions额度。“零API”仅指不调用付费模型/搜索服务。
 
-contents权限为read，checkout不保留凭证。此配置不是执行恶意仓库代码的通用网络沙箱。Artifact只包含JUnit和明确列出的固定演示结果，保留7天；不上传.env、SQLite或完整runs。
+contents权限为read，checkout不保留凭证。此配置不是执行恶意仓库代码的通用网络沙箱。Artifact包含JUnit、明确列出的固定演示结果，以及全量pytest产生的进程强杀恢复矩阵汇总，保留7天；不上传.env、SQLite或完整runs。恢复证据收集见[恢复CI说明](recovery-ci.md)。
 
 ## 复现与本地记录
 

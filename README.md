@@ -31,6 +31,8 @@ Python + Deep Agents；必要时局部下沉 LangGraph。框架负责 runtime / 
 
 已添加[离线 CI 配置](.github/workflows/offline-ci.yml)，推送 main、提交 PR 或手动触发后运行全量测试与固定资料演示，并保存验收产物。不注入模型/搜索密钥。[首次远程 CI](https://github.com/AutNiHilo-carry/ResearchDesk/actions/runs/43837421928)已通过507项测试、离线演示和产物上传，详见[CI 说明](docs/offline-ci.md)。
 
+进程强杀恢复已在全量测试中覆盖；CI同时归档该矩阵的固定资料结果，见[恢复验收证据](docs/recovery-ci.md)。
+
 ## 离线快速体验（PowerShell）
 
 需 Python 3.11，先确认 `python --version`。以下流程不需要 `.env` 或 API Key；安装依赖需要网络。

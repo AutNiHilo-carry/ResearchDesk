@@ -47,6 +47,16 @@ jobs:
         run: New-Item -ItemType Directory -Path artifacts,runs -Force | Out-Null
       - name: Full offline regression
         run: python -m pytest -q --junitxml=artifacts/pytest.xml --basetemp=runs/ci-pytest
+      - name: Collect process-kill recovery evidence
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $matrix = @(Get-ChildItem -LiteralPath runs/ci-pytest -Directory -Filter 'test_scripted_full_cli_kill_*' | ForEach-Object { Join-Path $_.FullName 'matrix' })
+          if ($matrix.Count -ne 1) { throw 'Expected one scripted process-kill recovery matrix from pytest' }
+          New-Item -ItemType Directory -Path artifacts/recovery-matrix -Force | Out-Null
+          foreach ($name in @('result.json', 'summary.md')) {
+            Copy-Item -LiteralPath (Join-Path $matrix[0] $name) -Destination (Join-Path artifacts/recovery-matrix $name)
+          }
       - name: Fixed-fixture mechanism acceptance
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: python -m researchdesk.acceptance_demo --output runs/ci-acceptance
@@ -59,6 +69,8 @@ jobs:
           if-no-files-found: warn
           path: |
             artifacts/pytest.xml
+            artifacts/recovery-matrix/result.json
+            artifacts/recovery-matrix/summary.md
             runs/ci-acceptance/summary.md
             runs/ci-acceptance/result.json
             runs/ci-acceptance/fixture-quality.json
