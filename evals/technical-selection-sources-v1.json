@@ -1,0 +1,38 @@
+{
+  "version": "technical-selection-sources-v1",
+  "captured_at": "2026-11-16",
+  "material_kind": "project_authored_partial_notes_not_web_snapshots",
+  "review_status": "pending_independent_human_review",
+  "sources": [
+    {
+      "document": "fixtures/sqlite-wal-selection-v1.md",
+      "url": "https://www.sqlite.org/wal.html",
+      "version_scope": "SQLite WAL documentation; unversioned page",
+      "sha256": "f7d06aeb9d0fcf1f89d8e6016a04d4bc09b1b26e0aea16444d77d67144a8e63d"
+    },
+    {
+      "document": "fixtures/sqlite-isolation-selection-v1.md",
+      "url": "https://www.sqlite.org/isolation.html",
+      "version_scope": "SQLite isolation documentation; unversioned page",
+      "sha256": "5d4d1ed241aa8fbbfd3b4074311aa20587ac617bbb40082db8c4173105a77a69"
+    },
+    {
+      "document": "fixtures/sqlite-usecase-selection-v1.md",
+      "url": "https://www.sqlite.org/whentouse.html",
+      "version_scope": "SQLite appropriate uses documentation; unversioned page",
+      "sha256": "16db44b66045069caaca99332be8bef2661b54a313f4a66764a67b9255fe168b"
+    },
+    {
+      "document": "fixtures/postgresql18-mvcc-selection-v1.md",
+      "url": "https://www.postgresql.org/docs/18/mvcc-intro.html",
+      "version_scope": "PostgreSQL 18 documentation",
+      "sha256": "ab689cdba71cfe86e72f0a6d21907ba4989969b3556fecbef166efcdf465be6f"
+    },
+    {
+      "document": "fixtures/postgresql18-locks-selection-v1.md",
+      "url": "https://www.postgresql.org/docs/18/explicit-locking.html",
+      "version_scope": "PostgreSQL 18 documentation",
+      "sha256": "0839e512b781db949e946cd23d01c2f3ebb57cf70e555b90fecf92239099d478"
+    }
+  ]
+}

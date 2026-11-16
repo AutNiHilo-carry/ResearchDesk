@@ -218,3 +218,5 @@ tool_events.jsonl 记录调用、拒绝、失败、重试和缓存命中；run.j
 - https://reference.langchain.com/python/langchain-deepseek/chat_models/ChatDeepSeek
 - https://docs.tavily.com/documentation/api-reference/endpoint/search
 
+
+技术选型垂类新增8个受约束任务，涵盖 SQLite / PostgreSQL 并发、部署、版本边界和证据不足；可零 API 准备冻结计划，尚未完成模型评测或独立人工审核。见 [技术选型任务集](docs/technical-selection-eval.md)。

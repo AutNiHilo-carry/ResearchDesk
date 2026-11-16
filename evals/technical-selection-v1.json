@@ -1,0 +1,189 @@
+{
+  "version": "research-tasks-v1",
+  "dataset_id": "technical-selection-v1",
+  "label_status": "project-authored candidate rubrics; pending independent human review",
+  "scope": "local curated technical notes only; not live web research or a measured benchmark",
+  "source_manifest": "technical-selection-sources-v1.json",
+  "thresholds": {
+    "citation_precision": 0.9,
+    "evidence_coverage": 0.6
+  },
+  "tasks": [
+    {
+      "id": "local_low_write",
+      "question": "为单机离线、写入很少的个人研究工具评估 SQLite 是否适合。说明选择依据、单写者限制和建议的适用条件，不声称所有场景优于服务器数据库。",
+      "documents": [
+        "fixtures/sqlite-usecase-selection-v1.md",
+        "fixtures/sqlite-isolation-selection-v1.md"
+      ],
+      "criteria": [
+        {
+          "id": "fit",
+          "description": "说明本地低写入场景可考虑 SQLite，并将推荐作为基于场景的判断。"
+        },
+        {
+          "id": "constraint",
+          "description": "保留同一数据库同一时刻一个写者的限制。"
+        },
+        {
+          "id": "bounded",
+          "description": "不声称性能已经测量或 SQLite 在所有负载下优于服务器数据库。"
+        }
+      ]
+    },
+    {
+      "id": "shared_network_wal",
+      "question": "两台主机拟通过网络文件系统直接共享同一 SQLite WAL 文件，这个方案是否符合资料约束？区分直接共享文件与远程用户经单机应用服务器访问。",
+      "documents": [
+        "fixtures/sqlite-wal-selection-v1.md",
+        "fixtures/sqlite-usecase-selection-v1.md"
+      ],
+      "criteria": [
+        {
+          "id": "reject_direct",
+          "description": "指出跨主机直接共享网络文件系统中的 WAL 数据库不符合资料中的限制。"
+        },
+        {
+          "id": "topology",
+          "description": "区分远程用户经同机应用服务器访问 SQLite 与跨主机直接共享文件。"
+        },
+        {
+          "id": "alternative",
+          "description": "可建议调整部署或考虑客户端/服务器数据库，不把建议写成已验证性能结论。"
+        }
+      ]
+    },
+    {
+      "id": "wal_single_writer",
+      "question": "有人说 WAL 支持读写并行，所以多个连接能同时成为同一数据库的写者。判断该推论是否成立，并保留真实并发能力。",
+      "documents": [
+        "fixtures/sqlite-wal-selection-v1.md",
+        "fixtures/sqlite-isolation-selection-v1.md"
+      ],
+      "criteria": [
+        {
+          "id": "read_write",
+          "description": "说明 WAL 允许读取与写入并行。"
+        },
+        {
+          "id": "single_writer",
+          "description": "说明同一数据库同一时刻仍只有一个写者。"
+        },
+        {
+          "id": "no_overcorrection",
+          "description": "不把反驳扩大成所有读取都不能并行或多个连接不能轮流写入。"
+        }
+      ]
+    },
+    {
+      "id": "mvcc_write_contention",
+      "question": "评审 PostgreSQL 18 的说法：采用 MVCC，所以两个事务同时更新同一行永远不会等待。用资料区分读写并发与冲突写入，避免扩大结论。",
+      "documents": [
+        "fixtures/postgresql18-mvcc-selection-v1.md",
+        "fixtures/postgresql18-locks-selection-v1.md"
+      ],
+      "criteria": [
+        {
+          "id": "distinguish",
+          "description": "区分 MVCC 的读写并发与冲突的行锁操作。"
+        },
+        {
+          "id": "counterexample",
+          "description": "使用同一行上的冲突更新或 FOR UPDATE 情形说明可能等待。"
+        },
+        {
+          "id": "bounded",
+          "description": "不声称所有更新都会阻塞，也不声称所有锁都不冲突。"
+        }
+      ]
+    },
+    {
+      "id": "performance_unknown",
+      "question": "仅凭这些资料，能否保证 PostgreSQL 18 在本项目达到 10000 TPS 且 P99 小于 5ms？给出一条已知机制事实、证据缺口和下一步建议。",
+      "documents": [
+        "fixtures/postgresql18-mvcc-selection-v1.md",
+        "fixtures/postgresql18-locks-selection-v1.md"
+      ],
+      "criteria": [
+        {
+          "id": "known_fact",
+          "description": "至少正确说明并引用一条 MVCC 或锁机制事实。"
+        },
+        {
+          "id": "abstain",
+          "description": "明确资料不足以作出给定 TPS 和 P99 的保证，不编造测试数据。"
+        },
+        {
+          "id": "next_step",
+          "description": "建议基于目标硬件和业务负载实测，并将其标为建议。"
+        }
+      ]
+    },
+    {
+      "id": "external_effect_unknown",
+      "question": "这些 SQLite / PostgreSQL 机制资料能否证明 Agent 崩溃恢复后外部扣款工具 exactly-once？区分数据库内机制与外部副作用保证，至少引用一条已知事实。",
+      "documents": [
+        "fixtures/sqlite-isolation-selection-v1.md",
+        "fixtures/postgresql18-mvcc-selection-v1.md"
+      ],
+      "criteria": [
+        {
+          "id": "known_fact",
+          "description": "正确引用一条数据库并发机制事实。"
+        },
+        {
+          "id": "scope_boundary",
+          "description": "说明现有数据库机制资料不足以证明外部扣款工具的 exactly-once。"
+        },
+        {
+          "id": "no_absolute",
+          "description": "不从证据不足推成该数据库永远不可能参与解决去重或可靠执行。"
+        }
+      ]
+    },
+    {
+      "id": "version_scope",
+      "question": "手头只有 PostgreSQL 18 摘记，能否据此确认 17 版所有锁行为完全相同？保留一条可确认的 18 版事实，说明版本核实边界。",
+      "documents": [
+        "fixtures/postgresql18-mvcc-selection-v1.md",
+        "fixtures/postgresql18-locks-selection-v1.md"
+      ],
+      "criteria": [
+        {
+          "id": "known_version",
+          "description": "明确所引用并发或锁事实的资料范围为 PostgreSQL 18。"
+        },
+        {
+          "id": "abstain",
+          "description": "不能仅凭 18 版摘记确认 17 版所有行为相同，建议核对对应版本资料。"
+        },
+        {
+          "id": "no_reverse_claim",
+          "description": "不把未核实说成 17 版已证实不同或不支持该能力。"
+        }
+      ]
+    },
+    {
+      "id": "wal_default_claim",
+      "question": "评审这句话：SQLite 默认就是 WAL，因此无需确认日志模式，且天然多写者。仅根据摘记纠正其中的错误，保留 WAL 真实能力。",
+      "documents": [
+        "fixtures/sqlite-wal-selection-v1.md",
+        "fixtures/sqlite-isolation-selection-v1.md"
+      ],
+      "criteria": [
+        {
+          "id": "default",
+          "description": "指出文档描述的默认方式是 rollback journal，WAL 是可选模式。"
+        },
+        {
+          "id": "single_writer",
+          "description": "纠正天然多写者说法，同一数据库同一时刻只有一个写者。"
+        },
+        {
+          "id": "read_write",
+          "description": "保留 WAL 读取和写入可以并行的真实能力，不声称已检查实际部署配置。"
+        }
+      ]
+    }
+  ]
+}
