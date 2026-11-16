@@ -33,6 +33,8 @@ Python + Deep Agents；必要时局部下沉 LangGraph。框架负责 runtime / 
 
 进程强杀恢复已在全量测试中覆盖；CI同时归档该矩阵的固定资料结果，见[恢复验收证据](docs/recovery-ci.md)。
 
+另有[模型响应与检查点间隙实验](docs/model-response-gap.md)：额度足够时可能补做模型步骤，额度耗尽时必须停止，不能宣称无重复成本恢复或模型调用exactly-once。
+
 ## 离线快速体验（PowerShell）
 
 需 Python 3.11，先确认 `python --version`。以下流程不需要 `.env` 或 API Key；安装依赖需要网络。

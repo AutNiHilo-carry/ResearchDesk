@@ -57,6 +57,16 @@ jobs:
           foreach ($name in @('result.json', 'summary.md')) {
             Copy-Item -LiteralPath (Join-Path $matrix[0] $name) -Destination (Join-Path artifacts/recovery-matrix $name)
           }
+      - name: Collect model-response gap evidence
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $gap = @(Get-ChildItem -LiteralPath runs/ci-pytest -Directory -Filter 'test_model_return_gap_is_*' | Where-Object { $_.Name -match '^test_model_return_gap_is_.*[0-9]+$' } | ForEach-Object { Join-Path $_.FullName 'gap' })
+          if ($gap.Count -ne 1) { throw "Expected one numbered model-response gap experiment, found $($gap.Count)" }
+          New-Item -ItemType Directory -Path artifacts/model-response-gap -Force | Out-Null
+          foreach ($name in @('result.json', 'summary.md')) {
+            Copy-Item -LiteralPath (Join-Path $gap[0] $name) -Destination (Join-Path artifacts/model-response-gap $name)
+          }
       - name: Fixed-fixture mechanism acceptance
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: python -m researchdesk.acceptance_demo --output runs/ci-acceptance
@@ -69,6 +79,8 @@ jobs:
           if-no-files-found: warn
           path: |
             artifacts/pytest.xml
+            artifacts/model-response-gap/result.json
+            artifacts/model-response-gap/summary.md
             artifacts/recovery-matrix/result.json
             artifacts/recovery-matrix/summary.md
             runs/ci-acceptance/summary.md

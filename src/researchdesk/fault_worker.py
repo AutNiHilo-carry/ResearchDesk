@@ -19,7 +19,15 @@ def install_fault(point, marker, root):
         atomic_text(marker, json.dumps(dict(point=point, run_id=directory.name, pid=os.getpid(), reached_at=now())))
         while True:
             time.sleep(0.1)
-    if point == "receipt":
+    if point == "model_response":
+        from .model_budget import BudgetCallbacks
+        original = BudgetCallbacks.on_llm_end
+        def returned(self, response, *, run_id, **kwargs):
+            original(self, response, run_id=run_id, **kwargs)
+            # Inline callback: model result has not returned to the graph node yet.
+            park(self.ledger.directory)
+        BudgetCallbacks.on_llm_end = returned
+    elif point == "receipt":
         original = ToolExecutor._finish
         def finish(self, fields, result, success):
             output = original(self, fields, result, success)
@@ -77,7 +85,7 @@ def scripted_model():
 
 def main():
     parser = argparse.ArgumentParser(description="Owned fault-evaluation subprocess")
-    parser.add_argument("--point", choices=["none", "evidence", "receipt", "report"], required=True)
+    parser.add_argument("--point", choices=["none", "evidence", "receipt", "report", "model_response"], required=True)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--marker", type=Path, required=True)
     parser.add_argument("--scripted", action="store_true")
