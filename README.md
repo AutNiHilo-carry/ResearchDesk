@@ -1,5 +1,7 @@
 # ResearchDesk
 
+[![Offline verification](https://github.com/AutNiHilo-carry/ResearchDesk/actions/workflows/offline-ci.yml/badge.svg)](https://github.com/AutNiHilo-carry/ResearchDesk/actions/workflows/offline-ci.yml)
+
 一个可恢复、可验证、可评测的长任务研究 Agent（当前处于 Phase 3，研究质量仍待稳定验收）。
 
 Python + Deep Agents；必要时局部下沉 LangGraph。框架负责 runtime / primitive，
@@ -27,29 +29,35 @@ Python + Deep Agents；必要时局部下沉 LangGraph。框架负责 runtime / 
 
 ## 离线持续集成
 
-已添加[离线 CI 配置](.github/workflows/offline-ci.yml)，推送 main、提交 PR 或手动触发后运行全量测试与固定资料演示，并保存验收产物。不注入模型/搜索密钥；本地添加不代表远程运行已通过，详见[CI 说明](docs/offline-ci.md)。
+已添加[离线 CI 配置](.github/workflows/offline-ci.yml)，推送 main、提交 PR 或手动触发后运行全量测试与固定资料演示，并保存验收产物。不注入模型/搜索密钥。[首次远程 CI](https://github.com/AutNiHilo-carry/ResearchDesk/actions/runs/43837421928)已通过507项测试、离线演示和产物上传，详见[CI 说明](docs/offline-ci.md)。
 
-## 安装（PowerShell）
+## 离线快速体验（PowerShell）
+
+需 Python 3.11，先确认 `python --version`。以下流程不需要 `.env` 或 API Key；安装依赖需要网络。
 
 ```powershell
+git clone https://github.com/AutNiHilo-carry/ResearchDesk.git
+cd ResearchDesk
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-Copy-Item .env.example .env
+.\.venv\Scripts\python.exe -m pip install -r requirements.lock.txt
+.\.venv\Scripts\python.exe -m pip install --no-deps -e .
+.\.venv\Scripts\python.exe -m researchdesk.acceptance_demo
 ```
 
-在本地 .env 填入 DEEPSEEK_API_KEY 和 TAVILY_API_KEY，不要提交密钥。
-默认 DEEPSEEK_MODEL=deepseek-flash，可自行修改。真实运行会产生 API 费用。
+打开命令打印的 `summary.md`，查看权限、证据、预算、回执复用和质量缺口的七项机制检查。模型标签为固定样例，演示不验证真实研究质量；详见[快速开始](docs/quickstart.md)。安装耗时取决于网络和磁盘。
+
+### 可选：真实研究
+
+只有需要调用 DeepSeek / Tavily 时才复制并填写 `.env`，真实调用会产生费用。保留空白密钥模板，不提交实际密钥。
 
 ```powershell
+Copy-Item .env.example .env
 .\.venv\Scripts\researchdesk.exe --doctor
-.\.venv\Scripts\researchdesk.exe --demo
-.\.venv\Scripts\researchdesk.exe "比较 SQLite 和 PostgreSQL 在个人研究工具中的适用性"
-.\.venv\Scripts\researchdesk.exe "根据文档总结约束" --document .\docs\direction.md
-.\.venv\Scripts\python.exe -m pytest -q
 ```
 
-doctor 仅检查配置存在性，不验证 Key 有效性。只读本地文档模式仅需模型 Key。
-所有运行产物在 runs/ 下；run.json 区分离线样例和真实运行。
+doctor只检查配置存在性，不验证Key有效性。带请求预算的完整研究入口见[受检工作流](docs/checked-workflow.md)。独立运行测试可用 `.\.venv\Scripts\python.exe -m pytest -q`。
+
+本地历史运行、模型输出与待审阅表位于 `runs/`，默认不随仓库发布；文档中的此类路径是本地索引，不代表GitHub上存在对应文件。
 
 ## Tool Policy
 
