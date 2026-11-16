@@ -278,7 +278,9 @@ def evaluate_batch(data, tasks, documents, artifact, *, runner=run_task, model_n
 
 
 def summary(result):
-    lines = ["# End-to-End Research Task Evaluation", "", "受控虚构资料，模型辅助评分；需人工复核。", "",
+    lines = ["# End-to-End Research Task Evaluation", "", "受控资料，模型辅助评分；需人工复核。",
+             f"Scope: {result.get('scope') or 'unspecified'}",
+             f"Label status: {result.get('label_status') or 'unspecified'}", "",
              f"Status: {result['status']}", f"Task Success Rate: {result.get('task_success_rate')}",
              f"Generation Completion Rate: {result.get('generation_completion_rate')}", "",
              "| Task | Generation | Success | Citation precision | Coverage | Tokens | Seconds | Retries |",
