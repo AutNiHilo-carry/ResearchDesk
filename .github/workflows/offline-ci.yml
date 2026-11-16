@@ -51,8 +51,8 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $matrix = @(Get-ChildItem -LiteralPath runs/ci-pytest -Directory -Filter 'test_scripted_full_cli_kill_*' | ForEach-Object { Join-Path $_.FullName 'matrix' })
-          if ($matrix.Count -ne 1) { throw 'Expected one scripted process-kill recovery matrix from pytest' }
+          $matrix = @(Get-ChildItem -LiteralPath runs/ci-pytest -Directory -Filter 'test_scripted_full_cli_kill_*' | Where-Object { $_.Name -match '^test_scripted_full_cli_kill_.*[0-9]+$' } | ForEach-Object { Join-Path $_.FullName 'matrix' })
+          if ($matrix.Count -ne 1) { throw "Expected one numbered scripted recovery matrix, found $($matrix.Count)" }
           New-Item -ItemType Directory -Path artifacts/recovery-matrix -Force | Out-Null
           foreach ($name in @('result.json', 'summary.md')) {
             Copy-Item -LiteralPath (Join-Path $matrix[0] $name) -Destination (Join-Path artifacts/recovery-matrix $name)
