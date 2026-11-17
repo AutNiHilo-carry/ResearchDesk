@@ -1,0 +1,11 @@
+{
+  "version": "task-grading-replay-targets-v1",
+  "label_status": "project-authored candidates; pending independent human review",
+  "scope": "targeted developer replay; original bodies but changed batch and criterion selection",
+  "targets": [
+    {"arm":"v1","task_id":"wal_single_writer","criterion_id":"single_writer","candidate_passed":true},
+    {"arm":"v2","task_id":"wal_single_writer","criterion_id":"single_writer","candidate_passed":true},
+    {"arm":"v1","task_id":"local_low_write","criterion_id":"bounded","candidate_passed":true},
+    {"arm":"v2","task_id":"local_low_write","criterion_id":"bounded","candidate_passed":true}
+  ]
+}
