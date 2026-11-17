@@ -97,6 +97,8 @@ def comparison(result):
         f"Execution mode: {result['execution_mode']}",
         "固定 v1→v2 顺序，每任务每组一次生成，无修订；短资料模型辅助评分，不构成泛化或显著性证明。",
         "项目自编 rubric 仍待独立人工复核；默认保持 v1。", "",
+        "Human review: pending; Final acceptance: pending（本入口不执行人工验收）。",
+        "下表通过率仅为模型辅助判定；scoring_failed组的未知结果不表示通过。", "",
         "| 策略 | 任务通过率 | 生成 Token | 评分 Token |", "|---|---:|---:|---:|"]
     for version, arm in result["arms"].items():
         lines.append(f"| {version} | {arm.get('task_success_rate')} | {arm.get('generation_total_tokens')} | {arm.get('evaluator_total_tokens')} |")
@@ -131,7 +133,7 @@ def execute_plan(directory, *, evaluator=None):
     output.mkdir(exist_ok=False)  # One shot; never silently repeat a partially paid experiment.
     result = dict(status="running", started_at=now(), controls=plan["controls"], arms={},
         execution_mode="model_assisted" if evaluator is None else "injected_offline",
-        promotion="no_automatic_promotion", human_review="pending", default_policy="v1")
+        promotion="no_automatic_promotion", human_review="pending", final_acceptance="pending", default_policy="v1")
     def save():
         atomic_text(output / "result.json", json.dumps(result, ensure_ascii=False, indent=2))
         atomic_text(output / "summary.md", comparison(result))

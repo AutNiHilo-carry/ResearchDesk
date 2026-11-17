@@ -220,3 +220,5 @@ tool_events.jsonl 记录调用、拒绝、失败、重试和缓存命中；run.j
 
 
 技术选型垂类新增8个受约束任务，涵盖 SQLite / PostgreSQL 并发、部署、版本边界和证据不足；可零 API 准备冻结计划，尚未完成模型评测或独立人工审核。见 [技术选型任务集](docs/technical-selection-eval.md)。
+
+评测摘要区分评分有效性、模型门槛与最终验收；可通过 "python -m researchdesk.task_eval --summarize <result.json>" 零 API 查看旧结果。模型通过仍待人工复核，见 [模型评分与验收边界](docs/model-assessment-boundary.md)。

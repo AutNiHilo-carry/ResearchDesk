@@ -68,6 +68,9 @@ def test_evaluation_orchestrates_full_artifacts_and_sums_generation_and_judge_to
     assert result["evaluator_total_tokens"] == 6
     assert result["total_tokens"] == 13
     assert result["estimated_fee"] is None and result["recovery_rate"] is None
+    assert result['tasks'][0]['assessment'] == dict(scoring_status='valid', model_gate='passed',
+                                                    human_review='pending', final_acceptance='pending')
+    assert result['final_acceptance'] == result['human_review'] == 'pending'
     assert (tmp_path / "eval" / "citation-quality.json").is_file()
 
 
@@ -88,6 +91,8 @@ def test_grading_failure_does_not_count_unknown_as_success(tmp_path):
     assert result["status"] == "scoring_failed"
     assert result["task_success_rate"] is None
     assert result["tasks"][0]["success"] is None
+    assert result['tasks'][0]['assessment']['scoring_status'] == 'invalid'
+    assert result['tasks'][0]['assessment']['model_gate'] == 'unknown'
 
 
 def test_failed_generation_is_in_denominator_and_needs_no_grader(tmp_path):
@@ -101,6 +106,7 @@ def test_failed_generation_is_in_denominator_and_needs_no_grader(tmp_path):
     assert result["task_success_rate"] == 0
     assert result["generation_completion_rate"] == 0
     assert result["generation_total_tokens"] is None
+    assert result['tasks'][0]['assessment']['scoring_status'] == 'not_scored'
 
 
 def test_rubric_grader_cannot_invent_anchors_or_omit_criteria():

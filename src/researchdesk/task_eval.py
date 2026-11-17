@@ -153,6 +153,24 @@ def task_success(record, rubric, metrics, thresholds):
             and record.get("generation_metrics", {}).get("provider_requests") == 0)
 
 
+def assessment(record, batch_status):
+    """Describe model scoring only; this evaluator cannot perform human acceptance."""
+    scoring, gate = "pending", "unknown"
+    if record.get("generation_status") != "completed":
+        scoring = "not_scored"
+    elif batch_status == "scoring_failed":
+        scoring = "invalid"
+    elif batch_status == "complete":
+        if (type(record.get("success")) is bool and isinstance(record.get("rubric"), dict)
+                and isinstance(record.get("quality"), dict)):
+            scoring, gate = "valid", "passed" if record["success"] else "failed"
+        else:
+            scoring = "invalid"
+    elif batch_status != "running":
+        scoring = "invalid"
+    return dict(scoring_status=scoring, model_gate=gate, human_review="pending", final_acceptance="pending")
+
+
 def evaluate_batch(data, tasks, documents, artifact, *, runner=run_task, model_name="deepseek-flash",
                    task_judge=None, evidence_judge=None, timeout=180):
     evaluation_started = time.monotonic()
@@ -180,8 +198,10 @@ def evaluate_batch(data, tasks, documents, artifact, *, runner=run_task, model_n
                   model_settings=dict(temperature=0, generator_max_tokens=4096, evaluator_max_tokens=8192),
                   thresholds=data["thresholds"], corpus_hashes={name: row["sha256"] for name, row in documents.items()},
                   task_prompt_suffix_sha256=digest(TASK_SUFFIX), task_timeout_seconds=timeout,
-                  tasks=[], promotion="human_review_required")
+                  tasks=[], promotion="human_review_required", human_review="pending", final_acceptance="pending")
     def save():
+        for row in result["tasks"]:
+            row["assessment"] = assessment(row, result["status"])
         atomic_text(artifact / "result.json", json.dumps(result, ensure_ascii=False, indent=2))
     save()
     for index, task in enumerate(tasks, 1):
@@ -283,11 +303,15 @@ def summary(result):
              f"Label status: {result.get('label_status') or 'unspecified'}", "",
              f"Status: {result['status']}", f"Task Success Rate: {result.get('task_success_rate')}",
              f"Generation Completion Rate: {result.get('generation_completion_rate')}", "",
-             "| Task | Generation | Success | Citation precision | Coverage | Tokens | Seconds | Retries |",
-             "|---|---|---|---:|---:|---:|---:|---:|"]
+             "Human review: pending; Final acceptance: pending（本入口不执行人工验收）。",
+             "valid仅表示评分合同通过；model_gate为模型辅助判定，不代表人工验收。",
+             "invalid表示评分无效；not_scored表示生成未完成；unknown不计为模型通过。", "",
+             "| Task | Generation | Scoring | Model gate | Citation precision | Coverage | Tokens | Seconds | Retries |",
+             "|---|---|---|---|---:|---:|---:|---:|---:|"]
     for row in result["tasks"]:
         metrics, quality = row.get("generation_metrics", {}), row.get("quality", {})
-        lines.append(f"| {row['task_id']} | {row['generation_status']} | {row.get('success')} "
+        state = assessment(row, result["status"])
+        lines.append(f"| {row['task_id']} | {row['generation_status']} | {state['scoring_status']} | {state['model_gate']} "
                      f"| {quality.get('citation_precision')} | {quality.get('evidence_coverage')} "
                      f"| {metrics.get('total_tokens')} | {row.get('elapsed_seconds')} | {metrics.get('retry_count')} |")
     lines += ["", f"Generation tokens: {result.get('generation_total_tokens')}",
@@ -296,15 +320,36 @@ def summary(result):
     return "\n".join(lines)
 
 
+def render_summary(source, directory):
+    raw = source.read_bytes()
+    result = json.loads(raw.decode("utf-8"))
+    rendered = summary(result)
+    directory.mkdir(parents=True, exist_ok=False)
+    atomic_text(directory / "summary.md", rendered)
+    atomic_text(directory / "provenance.json", json.dumps(dict(mode="offline_summary", api_requests=0,
+        source_sha256=hashlib.sha256(raw).hexdigest(), scoring_recomputed=False,
+        human_review="pending", final_acceptance="pending"), indent=2))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Controlled-corpus end-to-end research evaluation")
     parser.add_argument("--dataset", type=Path, default=Path("evals/research-tasks-v1.json"))
     parser.add_argument("--output", type=Path, default=Path("runs/task-evaluations"))
     parser.add_argument("--limit", type=int, default=3)
     parser.add_argument("--timeout", type=float, default=180)
+    parser.add_argument("--summarize", type=Path, help="Render an existing result offline; no grading or credentials")
     args = parser.parse_args()
     if not 1 <= args.limit <= 10 or not math.isfinite(args.timeout) or not 1 <= args.timeout <= 600:
         parser.error("limit must be 1..10 and timeout 1..600 seconds")
+    if args.summarize:
+        artifact = args.output / uuid4().hex
+        try:
+            render_summary(args.summarize, artifact)
+            print(f"Offline summary; zero API calls: {artifact / 'summary.md'}")
+            return 0
+        except Exception as error:
+            print(f"Offline summary failed ({type(error).__name__}).", file=sys.stderr)
+            return 1
     load_dotenv()
     if not os.getenv("DEEPSEEK_API_KEY", "").strip():
         print("Missing DEEPSEEK_API_KEY.", file=sys.stderr)
