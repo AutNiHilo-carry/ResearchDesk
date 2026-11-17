@@ -56,3 +56,7 @@ runs/workflows/<ID>/：
 - diagnostics/<ID>/：只含元数据的原研究和选中运行诊断。
 
 selected_report始终是供复核的报告路径；只有status明确为model_support_gate_passed才表示模型门槛通过。读取方不能以路径或report.md存在作为研究成功判据。
+
+## 命令行端到端验收
+
+独立子进程已使用真实 graph、checkpoint、修订和诊断链验证门槛通过、修订预算不足转待复核、零预算停止，以及再次启动不重复调用。供应商由固定脚本替换，无真实 API 或研究质量验证；见 [CLI 验收说明](workflow-cli-acceptance.md)。
