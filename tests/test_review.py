@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 from researchdesk.ledger import Ledger
-from researchdesk.review import build_packet, export_review, import_review
+from researchdesk.review import build_packet, export_review, import_review, fingerprint
 from researchdesk.task_eval import evaluate_batch, load_taskset
 from researchdesk.verification import VerificationError
 
@@ -157,3 +157,61 @@ def test_comparison_refuses_changed_controls(review_case, tmp_path):
     (candidate / "result.json").write_text(json.dumps(result), encoding="utf-8")
     with pytest.raises(VerificationError, match="controls differ"):
         compare_evaluations(baseline, candidate)
+
+
+def subset_case(review_case):
+    evaluation, dataset, _ = review_case
+    data = json.loads(dataset.read_text(encoding='utf-8'))
+    extra = dict(id='unselected', question='Unused question', documents=['unused.md'],
+                 criteria=[dict(id='extra', description='Unused criterion')])
+    (dataset.parent / 'unused.md').write_text('Unused document.', encoding='utf-8')
+    data['tasks'].insert(0, extra)  # Dataset order differs from frozen selected corpus.
+    dataset.write_text(json.dumps(data), encoding='utf-8')
+    result = json.loads((evaluation / 'result.json').read_text(encoding='utf-8'))
+    result['dataset_sha256'] = fingerprint(data)
+    (evaluation / 'result.json').write_text(json.dumps(result), encoding='utf-8')
+    return evaluation, dataset, result
+
+
+def test_selected_corpus_exports_and_blank_review_still_cannot_be_imported(review_case, tmp_path):
+    evaluation, dataset, result = subset_case(review_case)
+    result.update(status='scoring_failed', task_success_rate=None)
+    (evaluation / 'result.json').write_text(json.dumps(result), encoding='utf-8')
+    before = (evaluation / 'result.json').read_bytes()
+    bundle = tmp_path / 'subset-review'
+    export_review(evaluation, dataset, bundle)
+    packet = json.loads((bundle / 'packet.json').read_text(encoding='utf-8'))['content']
+    assert [t['task_id'] for t in packet['tasks']] == ['case']
+    guide = (bundle / 'reading.md').read_text(encoding='utf-8')
+    assert 'Document fact.' in guide and 'case:U1' in guide
+    assert 'Unused document.' not in guide
+    assert 'task_success_rate' not in guide and 'rubric_passed' not in guide
+    with pytest.raises(ValidationError):
+        import_review(evaluation, dataset, bundle, bundle / 'review.json', tmp_path / 'imported')
+    assert (evaluation / 'result.json').read_bytes() == before
+
+
+def test_full_corpus_uses_recorded_snapshot_order_even_if_taskset_order_differs(review_case):
+    evaluation, dataset, result = subset_case(review_case)
+    _, _, documents = load_taskset(dataset)
+    result['corpus_hashes']['unused.md'] = documents['unused.md']['sha256']
+    (evaluation / 'corpus/02-unused.md').write_bytes(b'Unused document.')
+    (evaluation / 'result.json').write_text(json.dumps(result), encoding='utf-8')
+    assert build_packet(evaluation, dataset)['tasks'][0]['task_id'] == 'case'
+
+
+@pytest.mark.parametrize('mutation', ['missing_required', 'unknown', 'hash', 'snapshot'])
+def test_selected_corpus_validation_is_not_weakened(review_case, tmp_path, mutation):
+    evaluation, dataset, result = subset_case(review_case)
+    if mutation == 'missing_required':
+        result['corpus_hashes'] = {}
+    elif mutation == 'unknown':
+        result['corpus_hashes']['unknown.md'] = 'unknown'
+    elif mutation == 'hash':
+        result['corpus_hashes']['source.md'] = 'changed'
+    else:
+        (evaluation / 'corpus/01-source.md').write_text('Changed snapshot', encoding='utf-8')
+    (evaluation / 'result.json').write_text(json.dumps(result), encoding='utf-8')
+    with pytest.raises(VerificationError):
+        export_review(evaluation, dataset, tmp_path / 'rejected')
+    assert not (tmp_path / 'rejected').exists()

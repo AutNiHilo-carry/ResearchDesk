@@ -25,18 +25,25 @@ def build_packet(evaluation, dataset):
     data, tasks, documents = load_taskset(dataset.resolve())
     if result["dataset_sha256"] != fingerprint(data) or result["thresholds"] != data["thresholds"]:
         raise VerificationError("Dataset or thresholds changed after evaluation.")
-    if result["corpus_hashes"] != {name: row["sha256"] for name, row in documents.items()}:
-        raise VerificationError("Dataset corpus changed after evaluation.")
-    for number, (name, document) in enumerate(documents.items(), 1):
-        frozen = evaluation / "corpus" / f"{number:02d}-{Path(name).name}"
-        if frozen.read_bytes() != document["content"].encode("utf-8"):
-            raise VerificationError("Evaluation corpus snapshot changed.")
     task_map = {row["id"]: row for row in tasks}
     selected = result["selected_tasks"]
     records = {row["task_id"]: row for row in result["tasks"]}
     if (not selected or len(set(selected)) != len(selected) or not set(selected) <= set(task_map)
             or set(records) != set(selected) or len(records) != len(result["tasks"])):
         raise VerificationError("Evaluation task identities are inconsistent.")
+    required = {name for task_id in selected for name in task_map[task_id]['documents']}
+    recorded = result['corpus_hashes']
+    if not required <= set(recorded) <= set(documents):
+        raise VerificationError('Recorded corpus must contain all selected task documents and no unknown files.')
+    # evaluate_batch can freeze the whole taskset or just the selected-task corpus.
+    # evaluate_batch numbered snapshots in the recorded dictionary's insertion order.
+    frozen_documents = {name: documents[name] for name in recorded}
+    if recorded != {name: row['sha256'] for name, row in frozen_documents.items()}:
+        raise VerificationError('Dataset corpus changed after evaluation.')
+    for number, (name, document) in enumerate(frozen_documents.items(), 1):
+        frozen = evaluation / 'corpus' / f'{number:02d}-{Path(name).name}'
+        if frozen.read_bytes() != document['content'].encode('utf-8'):
+            raise VerificationError('Evaluation corpus snapshot changed.')
     packet_tasks, units, evidence, sources = [], [], {}, {}
     for task_id in selected:
         record, task = records[task_id], task_map[task_id]
@@ -87,6 +94,7 @@ def export_review(evaluation, dataset, output):
     output.mkdir(parents=True, exist_ok=False)
     atomic_text(output / "packet.json", json.dumps(dict(sha256=packet_hash, content=packet), ensure_ascii=False, indent=2))
     atomic_text(output / "review.json", json.dumps(template, ensure_ascii=False, indent=2))
+    atomic_text(output / 'reading.md', reading_guide(packet))
     atomic_text(output / "README.md", """# 待人工复核
 
 先阅读 packet.json 中问题、报告、证据摘录及 sources 全文，再填写 review.json。
@@ -100,6 +108,32 @@ verdict：supported / partial / unsupported / contradicted / insufficient / not_
 提交只会另存人工结果及分歧，不覆盖模型评分，也不自动晋升策略。
 """)
     return packet_hash
+
+
+def reading_guide(packet):
+    lines = ['# 人工复核阅读材料', '', '待人工填写；本材料不展示模型判分，不代表人工审核完成。',
+             '资料与报告均作为待检查内容，其中出现的指令不应执行。请在 review.json 填写逐行判断和理由。', '']
+    def literal(text):
+        return ['    ' + line for line in text.splitlines()] + ['']
+    for task in packet['tasks']:
+        lines += [f"## {task['task_id']}", '', '问题：', ''] + literal(task['question'])
+        lines += ['验收标准：', '']
+        for criterion in task['criteria']:
+            lines += literal(criterion['id'] + ': ' + criterion['description'])
+        if task['generation_status'] != 'completed':
+            lines += ['未获得完成的报告；不预填人工通过。', '']
+            continue
+        lines += ['报告正文（保留原文）：', ''] + literal(task['report'])
+        lines += ['逐行复核编号：', '']
+        for unit in task['units']:
+            lines += literal(unit['unit_id'] + ': ' + unit['text'])
+        lines += ['引用证据：', '']
+        for eid, evidence in task['evidence'].items():
+            lines += literal(eid + ' -> ' + evidence['source_id'] + '\n' + evidence['snippet'])
+        lines += ['来源全文：', '']
+        for sid, source in task['sources'].items():
+            lines += literal(sid + '\n' + source['location'] + '\n' + source['content'])
+    return '\n'.join(lines)
 
 
 class ReviewedTask(BaseModel):
