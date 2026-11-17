@@ -44,3 +44,5 @@
 文档中的本地 runs 路径不代表公开附件。固定样例、脚本供应商、模型评分与真实人工标签分别标识；不把任一类自动转换成另一类。
 
 评测任务可通过 [任务 ID 选择](report-task-selection.md)准备，避免复制或改写原任务集。
+
+[后序三题真实对照](technical-selection-next-pilot.md)记录 PostgreSQL 并发与证据不足场景的分数、用量及待复核缺口。
