@@ -70,6 +70,31 @@ jobs:
       - name: Fixed-fixture mechanism acceptance
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: python -m researchdesk.acceptance_demo --output runs/ci-acceptance
+      - name: Build distribution wheel
+        run: python -m pip wheel --no-deps --wheel-dir artifacts/wheel .
+      - name: Check installed wheel outside source checkout
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $wheelEnv = Join-Path $env:RUNNER_TEMP 'researchdesk-wheel-env'
+          $wheelOutput = Join-Path $env:RUNNER_TEMP 'researchdesk-wheel-smoke'
+          if ((Test-Path -LiteralPath $wheelEnv) -or (Test-Path -LiteralPath $wheelOutput)) { throw 'Expected fresh wheel environment and output' }
+          $wheels = @(Get-ChildItem -LiteralPath artifacts/wheel -File -Filter '*.whl')
+          if ($wheels.Count -ne 1) { throw 'Expected exactly one wheel' }
+          python -m venv $wheelEnv
+          if ($LASTEXITCODE -ne 0) { throw 'Wheel venv creation failed' }
+          $wheelPython = Join-Path $wheelEnv 'Scripts/python.exe'
+          & $wheelPython -m pip install -r requirements.lock.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Wheel dependencies failed' }
+          & $wheelPython -m pip install --no-deps $wheels[0].FullName
+          if ($LASTEXITCODE -ne 0) { throw 'Wheel installation failed' }
+          & $wheelPython -I -m pip check
+          if ($LASTEXITCODE -ne 0) { throw 'Wheel dependency check failed' }
+          & $wheelPython -I scripts/smoke_wheel.py --wheel $wheels[0].FullName --output $wheelOutput
+          if ($LASTEXITCODE -ne 0) { throw 'Wheel smoke failed' }
+          New-Item -ItemType Directory -Path artifacts/wheel-smoke -Force | Out-Null
+          foreach ($name in @('result.json', 'summary.md')) {
+            Copy-Item -LiteralPath (Join-Path $wheelOutput $name) -Destination (Join-Path artifacts/wheel-smoke $name)
+          }
       - name: Upload verification results
         if: ${{ always() }}
         uses: actions/upload-artifact@v7
@@ -79,6 +104,9 @@ jobs:
           if-no-files-found: warn
           path: |
             artifacts/pytest.xml
+            artifacts/wheel/*.whl
+            artifacts/wheel-smoke/result.json
+            artifacts/wheel-smoke/summary.md
             artifacts/model-response-gap/result.json
             artifacts/model-response-gap/summary.md
             artifacts/recovery-matrix/result.json
