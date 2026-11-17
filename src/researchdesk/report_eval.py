@@ -51,11 +51,24 @@ def controls(plan):
         request_limit_scope="generation per task plus at most two batch graders per arm; no SDK retries; not a token or monetary cap")
 
 
-def create_plan(dataset, directory, *, model, limit=3, maximum=6, timeout=180):
-    if type(limit) is not int or not 1 <= limit <= 3:
+def create_plan(dataset, directory, *, model, limit=None, maximum=6, timeout=180, task_ids=None):
+    if limit is not None and (type(limit) is not int or not 1 <= limit <= 3):
         raise RecoveryError("Report pilot supports 1..3 tasks.")
+    if task_ids is not None:
+        if limit is not None:
+            raise RecoveryError('Choose either task IDs or a leading task limit, not both.')
+        if (type(task_ids) is not list or not 1 <= len(task_ids) <= 3
+                or any(not isinstance(key, str) or not key.strip() for key in task_ids)
+                or len(set(task_ids)) != len(task_ids)):
+            raise RecoveryError('Select 1..3 distinct nonempty task IDs.')
     data, tasks, documents = load_taskset(dataset.resolve())
-    tasks = tasks[:limit]
+    if task_ids is not None:
+        available = {task['id']: task for task in tasks}
+        if not set(task_ids) <= set(available):
+            raise RecoveryError('Selected task IDs must exist in the dataset.')
+        tasks = [available[key] for key in task_ids]
+    else:
+        tasks = tasks[:limit if limit is not None else 3]
     names = {name for task in tasks for name in task["documents"]}
     plan = dict(version=1, created_at=now(), data=data, tasks=tasks,
         documents={name: doc for name, doc in documents.items() if name in names},
@@ -167,12 +180,15 @@ def main():
     parser.add_argument("--dataset", type=Path)
     parser.add_argument("--model")
     parser.add_argument("--limit", type=int)
+    parser.add_argument('--task-id', action='append', dest='task_ids', help='Select 1..3 task IDs in the given order; repeat this option')
     parser.add_argument("--max-model-calls", type=int)
     parser.add_argument("--timeout", type=float)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    if args.execute_plan and any(getattr(args, key) is not None for key in ("dataset", "model", "limit", "max_model_calls", "timeout", "output")):
+    if args.execute_plan and any(getattr(args, key) is not None for key in ("dataset", "model", "limit", "task_ids", "max_model_calls", "timeout", "output")):
         parser.error("Execution accepts only the frozen plan directory, no replacements.")
+    if args.task_ids is not None and args.limit is not None:
+        parser.error('--task-id and --limit are mutually exclusive.')
     try:
         if args.execute_plan:
             load_dotenv()
@@ -184,7 +200,7 @@ def main():
             return 0 if result["status"] == "complete" else 3
         directory = (args.output or Path("runs/report-evaluations")) / uuid4().hex
         plan = create_plan(args.dataset or Path("evals/research-tasks-v1.json"), directory,
-            model=args.model or "deepseek-flash", limit=args.limit if args.limit is not None else 3,
+            model=args.model or "deepseek-flash", limit=args.limit, task_ids=args.task_ids,
             maximum=args.max_model_calls if args.max_model_calls is not None else 6,
             timeout=args.timeout if args.timeout is not None else 180)
         print(f"Prepared only; no API calls. Plan: {directory / 'plan.json'}")
