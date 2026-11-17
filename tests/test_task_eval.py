@@ -72,6 +72,8 @@ def test_evaluation_orchestrates_full_artifacts_and_sums_generation_and_judge_to
                                                     human_review='pending', final_acceptance='pending')
     assert result['final_acceptance'] == result['human_review'] == 'pending'
     assert (tmp_path / "eval" / "citation-quality.json").is_file()
+    details = (tmp_path / 'eval/citation-quality.md').read_text(encoding='utf-8')
+    assert result['tasks'][0]['task_id'] + ':U1' in details
 
 
 def test_completed_generation_with_unsupported_answer_fails_task(tmp_path):

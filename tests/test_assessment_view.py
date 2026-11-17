@@ -64,3 +64,11 @@ def test_bad_result_does_not_create_a_valid_looking_summary(tmp_path):
     with pytest.raises(KeyError):
         task_eval.render_summary(source, tmp_path / 'view')
     assert not (tmp_path / 'view').exists()
+
+
+def test_quality_option_without_offline_summary_is_rejected_before_credentials(monkeypatch):
+    monkeypatch.setattr(task_eval, 'load_dotenv', lambda: pytest.fail('No credentials on invalid command'))
+    monkeypatch.setattr(sys, 'argv', ['task_eval', '--with-quality'])
+    with pytest.raises(SystemExit) as error:
+        task_eval.main()
+    assert error.value.code == 2

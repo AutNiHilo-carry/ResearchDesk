@@ -159,7 +159,8 @@ def execute_plan(directory, *, evaluator=None):
             arm = (evaluator or evaluate_batch)(plan["data"], plan["tasks"], plan["documents"], arm_path,
                 model_name=plan["model"], timeout=plan["timeout"], runner=policy_runner(version, plan["max_model_calls"]))
             result["arms"][version] = arm
-            atomic_text(arm_path / "summary.md", summary(arm))
+            atomic_text(arm_path / "summary.md", summary(arm, quality_details=arm['status'] == 'complete'
+                                                          and bool(arm.get('quality_input_sha256'))))
             save()
             if controls(plan) != plan["controls"]:
                 raise RecoveryError("Controls changed while a report arm was running.")

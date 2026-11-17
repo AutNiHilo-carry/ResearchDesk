@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .ledger import now
 from .storage import atomic_text
 from .verification import (ModelJudge, VerificationError, assess, digest, failure_diagnostics,
-                           load_run, prepare, split_units)
+                           load_run, prepare, split_units, markdown as quality_markdown)
 from .task_grading import TaskJudge, grade_tasks
 from .run_metrics import run_metrics
 
@@ -253,6 +253,7 @@ def evaluate_batch(data, tasks, documents, artifact, *, runner=run_task, model_n
             save()
             quality = assess(payload, evidence_judge)
             atomic_text(artifact / "citation-quality.json", json.dumps(quality, ensure_ascii=False, indent=2))
+            atomic_text(artifact / "citation-quality.md", quality_markdown(quality))
             result["quality_input_sha256"] = fingerprint
             for record in completed:
                 rows = [row for row in quality["units"] if row["task_id"] == record["task_id"]]
@@ -297,7 +298,7 @@ def evaluate_batch(data, tasks, documents, artifact, *, runner=run_task, model_n
     return result
 
 
-def summary(result):
+def summary(result, *, quality_details=False):
     lines = ["# End-to-End Research Task Evaluation", "", "受控资料，模型辅助评分；需人工复核。",
              f"Scope: {result.get('scope') or 'unspecified'}",
              f"Label status: {result.get('label_status') or 'unspecified'}", "",
@@ -317,18 +318,63 @@ def summary(result):
     lines += ["", f"Generation tokens: {result.get('generation_total_tokens')}",
               f"Evaluator tokens: {result.get('evaluator_total_tokens')}",
               "Monetary cost and Recovery Rate: N/A (not measured by this batch).", ""]
+    if quality_details:
+        lines += ['[查看逐行引用与排除项](citation-quality.md)', '']
     return "\n".join(lines)
 
 
-def render_summary(source, directory):
+def saved_quality(evaluation, dataset, result):
+    """Validate saved labels against frozen inputs, without another semantic/model judgment."""
+    from .review import build_packet
+    if result.get('status') != 'complete' or not result.get('quality_input_sha256'):
+        raise VerificationError('A completed batch with saved citation input is required.')
+    packet = build_packet(evaluation, dataset)
+    units, evidence, sources = [], {}, {}
+    for task in packet['tasks']:
+        units.extend(task.get('units', []))
+        evidence.update(task.get('evidence', {}))
+        sources.update(task.get('sources', {}))
+    payload, fingerprint = prepare(units, evidence, sources)
+    if fingerprint != result['quality_input_sha256']:
+        raise VerificationError('Saved quality input no longer matches reports and evidence.')
+    raw = (evaluation / 'citation-quality.json').read_bytes()
+    quality = json.loads(raw.decode('utf-8'))
+    labels = {'units': [{key: row[key] for key in ('unit_id', 'factual', 'reason', 'links')}
+                        for row in quality['units']]}
+    def replay_labels(_):
+        return labels
+    replay_labels.prompt_version = quality.get('prompt_version')
+    replay_labels.prompt_sha256 = quality.get('judge_prompt_sha256')
+    checked = assess(payload, replay_labels)
+    if checked != quality:
+        raise VerificationError('Saved citation rows, coverage or metrics are inconsistent.')
+    for task in result['tasks']:
+        if task['generation_status'] == 'completed':
+            rows = [row for row in checked['units'] if row['task_id'] == task['task_id']]
+            if task.get('quality') != quality_metrics(rows):
+                raise VerificationError('Task metrics differ from saved citation labels.')
+    return quality, dict(quality_sha256=hashlib.sha256(raw).hexdigest(), input_sha256=fingerprint,
+                         label_validation='deterministic_replay_of_saved_labels_not_new_semantic_scoring')
+
+
+def render_summary(source, directory, *, with_quality=False, dataset=None):
     raw = source.read_bytes()
     result = json.loads(raw.decode("utf-8"))
-    rendered = summary(result)
+    rendered = summary(result, quality_details=with_quality)
+    quality, quality_binding = None, {}
+    if with_quality:
+        if dataset is None:
+            raise VerificationError('Dataset is required for bound citation rendering.')
+        quality, quality_binding = saved_quality(source.parent, dataset, result)
+        if source.read_bytes() != raw:
+            raise VerificationError('Result changed while preparing the quality view.')
     directory.mkdir(parents=True, exist_ok=False)
     atomic_text(directory / "summary.md", rendered)
+    if quality is not None:
+        atomic_text(directory / 'citation-quality.md', quality_markdown(quality))
     atomic_text(directory / "provenance.json", json.dumps(dict(mode="offline_summary", api_requests=0,
         source_sha256=hashlib.sha256(raw).hexdigest(), scoring_recomputed=False,
-        human_review="pending", final_acceptance="pending"), indent=2))
+        human_review="pending", final_acceptance="pending", **quality_binding), indent=2))
 
 
 def main():
@@ -338,13 +384,16 @@ def main():
     parser.add_argument("--limit", type=int, default=3)
     parser.add_argument("--timeout", type=float, default=180)
     parser.add_argument("--summarize", type=Path, help="Render an existing result offline; no grading or credentials")
+    parser.add_argument('--with-quality', action='store_true', help='Include bound saved citation details with --summarize')
     args = parser.parse_args()
+    if args.with_quality and not args.summarize:
+        parser.error('--with-quality requires --summarize.')
     if not 1 <= args.limit <= 10 or not math.isfinite(args.timeout) or not 1 <= args.timeout <= 600:
         parser.error("limit must be 1..10 and timeout 1..600 seconds")
     if args.summarize:
         artifact = args.output / uuid4().hex
         try:
-            render_summary(args.summarize, artifact)
+            render_summary(args.summarize, artifact, with_quality=args.with_quality, dataset=args.dataset)
             print(f"Offline summary; zero API calls: {artifact / 'summary.md'}")
             return 0
         except Exception as error:
@@ -359,7 +408,8 @@ def main():
         data, tasks, documents = load_taskset(args.dataset.resolve())
         result = evaluate_batch(data, tasks[:args.limit], documents, artifact,
                                 model_name=os.getenv("DEEPSEEK_MODEL", "deepseek-flash"), timeout=args.timeout)
-        atomic_text(artifact / "summary.md", summary(result))
+        atomic_text(artifact / "summary.md", summary(result, quality_details=result['status'] == 'complete'
+                                                   and bool(result.get('quality_input_sha256'))))
         print(f"Task evaluation: {artifact / 'summary.md'}")
         print(f"Status: {result['status']}; Task Success Rate: {result.get('task_success_rate')}")
         return 0 if result["status"] == "complete" and result["task_success_rate"] == 1 else 3

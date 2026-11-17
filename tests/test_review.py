@@ -215,3 +215,87 @@ def test_selected_corpus_validation_is_not_weakened(review_case, tmp_path, mutat
     with pytest.raises(VerificationError):
         export_review(evaluation, dataset, tmp_path / 'rejected')
     assert not (tmp_path / 'rejected').exists()
+
+
+@pytest.fixture
+def gap_evaluation(review_case):
+    # Explicit synthetic labels: two supported lines and one uncited inference.
+    from researchdesk.task_eval import quality_metrics
+    from researchdesk.verification import load_run, split_units, prepare, assess
+    evaluation, dataset, _ = review_case
+    run = evaluation / 'tasks/case/research' / ('a' * 32)
+    body, evidence, sources, _ = load_run(run)
+    ledger = Ledger(run, resume=True)
+    try:
+        ledger.save_report(body + '\n' + body + '\nUncited inference.')
+    finally:
+        ledger.store.close()
+    rows = split_units(load_run(run)[0])
+    for row in rows:
+        row.update(unit_id='case:' + row['unit_id'], task_id='case')
+    payload, fingerprint = prepare(rows, evidence, sources)
+    def labels(payload):
+        return {'units': [dict(unit_id=r['unit_id'], factual=True, reason='Fixture reference',
+            links=[dict(evidence_id=eid, verdict='supported', reason='Fixture reference') for eid in r['citations']])
+            for r in payload['units']]}
+    quality = assess(payload, labels)
+    (evaluation / 'citation-quality.json').write_text(json.dumps(quality), encoding='utf-8')
+    result = json.loads((evaluation / 'result.json').read_text(encoding='utf-8'))
+    result['quality_input_sha256'] = fingerprint
+    result['tasks'][0]['quality'] = quality_metrics(quality['units'])
+    (evaluation / 'result.json').write_text(json.dumps(result), encoding='utf-8')
+    return evaluation, dataset, run
+
+
+def test_quality_details_locate_gap_even_when_model_gate_passes(gap_evaluation, tmp_path, monkeypatch):
+    import sys
+    from researchdesk import task_eval
+    evaluation, dataset, run = gap_evaluation
+    before = {p: p.read_bytes() for p in (evaluation / 'result.json', evaluation / 'citation-quality.json',
+                                         run / 'report.md', run / 'draft.md')}
+    monkeypatch.setattr(task_eval, 'load_dotenv', lambda: pytest.fail('No credentials'))
+    monkeypatch.setattr(task_eval, 'ModelJudge', lambda *a, **k: pytest.fail('No model'))
+    monkeypatch.setattr(task_eval, 'TaskJudge', lambda *a, **k: pytest.fail('No model'))
+    output = tmp_path / 'views'
+    monkeypatch.setattr(sys, 'argv', ['task_eval', '--summarize', str(evaluation / 'result.json'),
+        '--with-quality', '--dataset', str(dataset), '--output', str(output)])
+    assert task_eval.main() == 0
+    view = next(output.iterdir())
+    summary = (view / 'summary.md').read_text(encoding='utf-8')
+    details = (view / 'citation-quality.md').read_text(encoding='utf-8')
+    assert '| valid | passed |' in summary and '(citation-quality.md)' in summary
+    assert 'case:U3' in details and 'Uncited inference.' in details and 'Covered: False' in details
+    assert 'Final acceptance: pending' in summary
+    manifest = json.loads((view / 'provenance.json').read_text(encoding='utf-8'))
+    assert manifest['api_requests'] == 0 and manifest['scoring_recomputed'] is False
+    assert manifest['quality_sha256'] and manifest['input_sha256']
+    assert all(p.read_bytes() == raw for p, raw in before.items())
+
+
+@pytest.mark.parametrize('mutation', ['report', 'quality_text', 'quality_metrics', 'task_metrics', 'missing_quality', 'input_binding'])
+def test_quality_view_rejects_changed_or_unbound_details(gap_evaluation, tmp_path, mutation):
+    from researchdesk.task_eval import render_summary
+    evaluation, dataset, run = gap_evaluation
+    result_path, quality_path = evaluation / 'result.json', evaluation / 'citation-quality.json'
+    if mutation == 'report':
+        path = run / ('draft.md' if (run / 'draft.md').exists() else 'report.md')
+        path.write_text(path.read_text(encoding='utf-8').replace('Uncited inference.', 'Changed fact.', 1), encoding='utf-8')
+    elif mutation == 'missing_quality':
+        quality_path.unlink()
+    elif mutation in {'task_metrics', 'input_binding'}:
+        result = json.loads(result_path.read_text(encoding='utf-8'))
+        if mutation == 'task_metrics':
+            result['tasks'][0]['quality']['evidence_coverage'] = 1
+        else:
+            result.pop('quality_input_sha256')
+        result_path.write_text(json.dumps(result), encoding='utf-8')
+    else:
+        quality = json.loads(quality_path.read_text(encoding='utf-8'))
+        if mutation == 'quality_text':
+            quality['units'][0]['text'] = 'Unrelated body'
+        else:
+            quality['metrics']['evidence_coverage'] = 1
+        quality_path.write_text(json.dumps(quality), encoding='utf-8')
+    with pytest.raises((VerificationError, FileNotFoundError)):
+        render_summary(result_path, tmp_path / 'view', with_quality=True, dataset=dataset)
+    assert not (tmp_path / 'view').exists()
