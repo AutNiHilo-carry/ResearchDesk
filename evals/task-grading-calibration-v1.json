@@ -1,0 +1,15 @@
+{
+  "version": "task-grading-calibration-v1",
+  "label_status": "project-authored candidates; pending independent human review",
+  "scope": "short developer fixtures; no held-out or task-quality claim",
+  "cases": [
+    {"id":"bounded_recommendation","question":"为本地低写入工具推荐数据库。","report":"在本地低写入且允许写入排队的条件下，可考虑 SQLite。","documents":["SQLite 面向本地应用存储。"],"criterion":{"id":"bounded","description":"不声称已经测得性能，也不声称所有负载下优于服务器数据库。"},"candidate_passed":true},
+    {"id":"universal_overclaim","question":"为本地工具推荐数据库。","report":"可考虑 SQLite。它在所有负载下都优于服务器数据库。","documents":["SQLite 面向本地应用存储。"],"criterion":{"id":"bounded","description":"不声称已经测得性能，也不声称所有负载下优于服务器数据库。"},"candidate_passed":false},
+    {"id":"nonmeasurement_explicit","question":"资料能否证明性能优越？","report":"资料未提供测量数据，不能据此断言 SQLite 在该场景优于服务器数据库。","documents":["资料没有特定负载的性能测量。"],"criterion":{"id":"bounded","description":"不声称已经测得性能，也不声称所有负载下优于服务器数据库。"},"candidate_passed":true},
+    {"id":"measurement_overclaim","question":"资料能否证明性能优越？","report":"虽然资料没有实测，但本项目已测得 SQLite 达到 10000 TPS。","documents":["仅有机制资料，无本项目实测结果。"],"criterion":{"id":"bounded","description":"不声称本项目已测得性能。"},"candidate_passed":false},
+    {"id":"required_limit_present","question":"说明写入限制。","report":"同一数据库同一时刻只有一个写者，多连接可轮流写入。","documents":["同一数据库同一时刻只有一个写者。"],"criterion":{"id":"limit","description":"明确说明同一数据库同一时刻只有一个写者。"},"candidate_passed":true},
+    {"id":"document_only_limit","question":"说明写入限制。","report":"SQLite 用于本地数据存储。","documents":["同一数据库同一时刻只有一个写者。"],"criterion":{"id":"limit","description":"明确说明同一数据库同一时刻只有一个写者。"},"candidate_passed":false},
+    {"id":"required_disclaimer_absent","question":"说明是否测量了性能。","report":"可考虑 SQLite 用于本地低写入工具。","documents":["没有性能实测数据。"],"criterion":{"id":"disclaimer","description":"报告必须明确声明没有性能测量数据。"},"candidate_passed":false},
+    {"id":"semantic_paraphrase","question":"说明写入限制。","report":"一个数据库同时只能由一位写入者写入，其他连接须轮流写。","documents":["同一数据库同一时刻只有一个写者。"],"criterion":{"id":"limit","description":"明确说明同一数据库同一时刻只有一个写者。"},"candidate_passed":true}
+  ]
+}

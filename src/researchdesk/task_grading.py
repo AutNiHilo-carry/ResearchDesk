@@ -17,6 +17,29 @@ Do not reward an unsupported confident answer. Do not output chain-of-thought.
 """
 
 
+TASK_PROMPT_V2 = TASK_PROMPT + """
+The report field is the ONLY source of report_quote. Documents are context for checking facts,
+not report text. Never copy a quote from documents or an Evidence Ledger appendix absent from
+the report field, even when that text would support the criterion. Never paraphrase or join
+separate substrings into a quote. Select an exact contiguous span from report.
+Grade only the supplied criterion. Do not add requirements, prescribed wording, or require
+an explicit disclaimer unless the criterion explicitly asks for one.
+For a prohibition such as 'does not claim measured performance or universal superiority',
+read the whole report for violations. A bounded recommendation without those claims may pass;
+it need not repeat the prohibition verbatim. Quote a relevant bounded statement as a witness;
+the witness alone does not establish absence. An actual contrary claim anywhere means failure.
+For a positive requirement (e.g. 'states the one-writer limit'), silence means failure even
+if documents contain the required fact. Distinguish absence of a prohibited claim from absence
+of a required statement. Correct wording or valid JSON alone never proves semantic correctness.
+"""
+
+
+def task_prompt(version):
+    if version not in {"v1", "v2"}:
+        raise VerificationError("Unknown task grader prompt version.")
+    return TASK_PROMPT if version == "v1" else TASK_PROMPT_V2
+
+
 class CriterionGrade(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     criterion_id: str
@@ -37,18 +60,19 @@ class TaskGrades(BaseModel):
 
 
 class TaskJudge:
-    def __init__(self, model_name):
+    def __init__(self, model_name, *, prompt_version="v1"):
+        self.prompt = task_prompt(prompt_version)
         from langchain_deepseek import ChatDeepSeek
         self.usage = None
         self.last_output = None
-        self.prompt_version = "research-task-rubric-v1"
-        self.prompt_sha256 = digest(TASK_PROMPT)
+        self.prompt_version = "research-task-rubric-" + prompt_version
+        self.prompt_sha256 = digest(self.prompt)
         self.model = ChatDeepSeek(model=model_name, temperature=0, timeout=90, max_retries=0,
             max_tokens=8192, extra_body={"thinking": {"type": "disabled"}}).bind(
                 response_format={"type": "json_object"})
 
     def __call__(self, payload):
-        message = self.model.invoke([{"role": "system", "content": TASK_PROMPT},
+        message = self.model.invoke([{"role": "system", "content": self.prompt},
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}])
         self.usage = message.usage_metadata
         if message.response_metadata.get("finish_reason") == "length":
