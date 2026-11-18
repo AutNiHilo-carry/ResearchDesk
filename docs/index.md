@@ -48,3 +48,5 @@
 [后序三题真实对照](technical-selection-next-pilot.md)记录 PostgreSQL 并发与证据不足场景的分数、用量及待复核缺口。
 
 [逐行引用缺口视图](citation-gap-view.md)复用已有模型标签，离线定位具体句子与证据关系。
+
+[外部副作用题定向修订](targeted-repair-budget-result.md)记录反馈复用、实际预算停止和原稿保留结果。
