@@ -35,10 +35,28 @@ class Trace(BaseModel):
     claims: list[ClaimTrace] = Field(min_length=1, max_length=60)
 
 
-def inputs(directory):
-    report, evidence, sources, _ = load_run(directory)
+def inputs(directory, *, revision=None):
+    report, evidence, sources, metadata = load_run(directory)
+    revision_binding = None
+    if revision is not None:
+        if revision not in {"original", "candidate"} or metadata.get("mode") != "repair_candidate":
+            raise VerificationError("Revision selection requires an explicit repair revision.")
+        state_text = (directory / "repair-state.json").read_text(encoding="utf-8")
+        state = json.loads(state_text)
+        if state.get("version") != 1 or state.get("status") != "completed":
+            raise VerificationError("Revision tracing requires a completed repair.")
+        path = directory / "revisions" / f"{revision}.md"
+        if not path.resolve().is_relative_to(directory.resolve()):
+            raise VerificationError("Repair revision escapes its run directory.")
+        report = path.read_text(encoding="utf-8")
+        key = "candidate_sha256" if revision == "candidate" else "original_report_sha256"
+        if digest(report) != state.get(key):
+            raise VerificationError("Repair revision does not match its saved hash.")
+        revision_binding = dict(revision=revision, report_sha256=digest(report),
+                                repair_state_sha256=digest(state_text))
     draft = directory / "draft.md"
-    if "```" in report or "~~~" in report or (draft.is_file() and draft.read_text(encoding="utf-8").strip() != report.strip()):
+    if ("```" in report or "~~~" in report or (revision is None and draft.is_file()
+            and draft.read_text(encoding="utf-8").strip() != report.strip())):
         raise VerificationError("Inference tracing refuses fenced or omitted report content.")
     units = split_units(report)
     if len(units) > 60:
@@ -48,19 +66,21 @@ def inputs(directory):
             if evidence_context(eid, evidence, sources)["integrity"] != "valid":
                 raise VerificationError("Original report has invalid evidence.")
     frozen = dict(report=report, evidence=evidence, sources=sources)
+    if revision_binding is not None:
+        frozen["repair_revision"] = revision_binding
     fingerprint = digest(json.dumps(frozen, ensure_ascii=False, sort_keys=True))
     return units, evidence, sources, fingerprint
 
 
-def create_trace(directory):
-    units, _, _, fingerprint = inputs(directory)
+def create_trace(directory, *, revision=None):
+    units, _, _, fingerprint = inputs(directory, revision=revision)
     return dict(version=VERSION, input_sha256=fingerprint, claims=[dict(unit_id=u["unit_id"], text=u["text"],
         kind="unclassified", premises=[], rationale="") for u in units])
 
 
-def check_trace(directory, raw):
+def check_trace(directory, raw, *, revision=None):
     trace = Trace.model_validate(raw)
-    units, evidence, sources, fingerprint = inputs(directory)
+    units, evidence, sources, fingerprint = inputs(directory, revision=revision)
     if trace.input_sha256 != fingerprint:
         raise VerificationError("Report, corpus or evidence changed after trace export.")
     originals = {u["unit_id"]: u for u in units}
@@ -105,13 +125,17 @@ def main():
     parser.add_argument("action", choices=["export", "check"])
     parser.add_argument("run", type=Path)
     parser.add_argument("--trace", type=Path)
+    parser.add_argument("--revision", choices=["original", "candidate"],
+                        help="Read this saved repair revision instead of the selected report")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if (args.action == "check") != (args.trace is not None):
         parser.error("check requires --trace; export does not accept it")
     try:
-        trace = create_trace(args.run) if args.action == "export" else json.loads(args.trace.read_text(encoding="utf-8"))
-        result = check_trace(args.run, trace)
+        trace = create_trace(args.run, revision=args.revision) if args.action == "export" else json.loads(args.trace.read_text(encoding="utf-8"))
+        result = check_trace(args.run, trace, revision=args.revision)
+        if args.revision is not None:
+            result["repair_revision"] = args.revision
         args.output.mkdir(parents=True, exist_ok=False)
         atomic_text(args.output / "trace.json", json.dumps(trace, ensure_ascii=False, indent=2))
         atomic_text(args.output / "integrity.json", json.dumps(result, ensure_ascii=False, indent=2))

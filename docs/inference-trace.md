@@ -11,6 +11,23 @@
 
 输入须为已完成研究运行。全程离线，不加载凭证、不调用模型、不修改原报告、数据库或评分。输出目录须不存在；先检查再创建，不覆盖历史附件。中断可能留下未完成附件，另选新目录处理，不把缺少 integrity.json 的目录当作已检查产物。
 
+### 分析修订稿
+
+修订被拒后，运行目录的 draft.md / report.md 仍是选中的原稿。若要分析被拒候选，须显式选择，不能把默认导出当成候选内容：
+
+```powershell
+.\.venv\Scripts\python.exe -m researchdesk.inference export runs/repairs/<RunID> --revision candidate --output runs/inference-traces/<新目录>
+.\.venv\Scripts\python.exe -m researchdesk.inference check runs/repairs/<RunID> --revision candidate --trace ./trace.json --output runs/inference-checks/<新目录>
+```
+
+`--revision original` 则选择保存的修订前原稿。两者仅允许已完成的 repair_candidate 运行，核对 revisions 下对应正文与 repair-state.json 已存哈希；无候选、状态未完成、文件越界或内容变化均拒绝。候选保留全部正文，不按最终报告的附录规则截断。哈希是本地一致性绑定，不是来源真实性或语义正确性证明。
+
+显式修订附件还绑定修订类型和完整 repair-state.json 文本哈希，与默认报告附件不能混用；状态后续变化需要重新导出。不传选项时保留旧快照格式及读取规则。修订附件仍全为 unclassified，不自动添加前提或判为通过。
+
+后续 `researchdesk.inference_check prepare` 支持同一 `--revision` 选项。准备及执行前都会重新核对修订，执行请求不能移除选项降级为默认报告。代码更新也会使旧的待执行语义请求失效，需重新准备；历史结果保留。语义执行仍单独计费，本次只读导出不触发它。
+
+2026-11-18 已对[预算提示真实对照](repair-budget-comparison.md)的两份被拒候选进行只读导出：off 为 11 个完整正文单元，snapshot-v1 为 9 个；均包含标题等非事实候选行，不等于事实句数。附件位于本地 `runs/inference-traces/6d859bbd45ce42e697b3207d3d9c6b88/`，两组所有分类均为 unclassified、前提为空，语义检查未执行、人工复核待完成。导出前后逐文件 SHA-256 对比确认两个原运行未变，本轮零 SDK 请求，不更改历史引用指标。运行附件不提交仓库。
+
 导出覆盖全部正文行，kind 留 unclassified，premises 为空，rationale 为空，结果为 draft。保留全部行，即使本轮只研究几句，也不能在附件中省略其余行或替换原句。围栏和会被证据附录分隔符截掉的 draft 拒绝处理，避免静默漏检。
 
 kind 可声明 direct_fact、source_attribution、synthesis、recommendation、abstention 或 nonfactual。分类属于声明，不是程序判断。每个前提包含局部唯一的 P1 等 id、statement 和 evidence_ids；rationale 记录简短、可审查的关联理由，不要求隐藏推理内容。纯建议可无事实前提；直接事实、来源陈述、综合及保留结论没有前提时保持 draft。前提没有证据同样保持 draft，不用空证据冒充已证实。

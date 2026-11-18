@@ -72,8 +72,8 @@ def fingerprint(value):
     return digest(json.dumps(value, ensure_ascii=False, sort_keys=True))
 
 
-def prepare(directory, raw_trace, selected):
-    integrity = check_trace(directory, raw_trace)
+def prepare(directory, raw_trace, selected, *, revision=None):
+    integrity = check_trace(directory, raw_trace, revision=revision)
     trace = Trace.model_validate(raw_trace)
     if not selected or len(selected) > 8 or len(set(selected)) != len(selected):
         raise VerificationError("Select 1..8 distinct conclusion IDs explicitly.")
@@ -85,7 +85,7 @@ def prepare(directory, raw_trace, selected):
     claims = [by_id[key].model_dump() for key in selected]
     if any(not c['premises'] or c['kind'] in {'unclassified', 'nonfactual'} for c in claims):
         raise VerificationError("Semantic checks require explicit conclusions with evidenced premises.")
-    units, evidence, sources, found_hash = inputs(directory)
+    units, evidence, sources, found_hash = inputs(directory, revision=revision)
     if found_hash != integrity['input_sha256']:
         raise VerificationError("Inputs changed during semantic preparation.")
     for sid, source in sources.items():
@@ -100,6 +100,8 @@ def prepare(directory, raw_trace, selected):
         task_question=question,
         trace_sha256=integrity['trace_sha256'], run_snapshot_sha256=found_hash, report_units=units,
         conclusions=claims, evidence={key: evidence[key] for key in sorted(ids)}, sources=sources)
+    if revision is not None:
+        payload['repair_revision'] = revision
     if len(json.dumps(payload, ensure_ascii=False)) > 60000:
         raise VerificationError("Semantic input exceeds 60000 characters; refusing truncation.")
     return payload
@@ -172,18 +174,22 @@ def code_hashes():
             for name in ('inference.py', 'inference_check.py', 'verification.py')}
 
 
-def create_request(directory, trace, selected, model):
+def create_request(directory, trace, selected, model, *, revision=None):
     if not isinstance(model, str) or not model.strip():
         raise VerificationError("A model must be pinned.")
-    payload = prepare(directory, trace, selected)
-    return dict(version=VERSION, run_directory=str(directory.resolve()), trace=trace, selected=selected,
+    payload = prepare(directory, trace, selected, revision=revision)
+    request = dict(version=VERSION, run_directory=str(directory.resolve()), trace=trace, selected=selected,
         model=model, payload=payload, payload_sha256=fingerprint(payload), prompt_sha256=digest(PROMPT),
         code_sha256=code_hashes(), max_sdk_requests=1,
         settings=dict(temperature=0, timeout=90, max_retries=0, max_tokens=8192))
+    if revision is not None:
+        request['repair_revision'] = revision
+    return request
 
 
 def verify_request(request):
-    expected = create_request(Path(request['run_directory']), request['trace'], request['selected'], request['model'])
+    expected = create_request(Path(request['run_directory']), request['trace'], request['selected'], request['model'],
+                              revision=request.get('repair_revision'))
     if request != expected:
         raise VerificationError("Frozen semantic request changed before execution.")
 
@@ -250,6 +256,7 @@ def main():
     make = commands.add_parser('prepare')
     make.add_argument('run', type=Path)
     make.add_argument('--trace', type=Path, required=True)
+    make.add_argument('--revision', choices=['original', 'candidate'])
     make.add_argument('--unit', action='append', required=True)
     make.add_argument('--model', default='deepseek-flash')
     make.add_argument('--output', type=Path, required=True)
@@ -259,7 +266,7 @@ def main():
     try:
         if args.action == 'prepare':
             trace = json.loads(args.trace.read_text(encoding='utf-8'))
-            request = create_request(args.run, trace, args.unit, args.model)
+            request = create_request(args.run, trace, args.unit, args.model, revision=args.revision)
             args.output.mkdir(parents=True, exist_ok=False)
             atomic_text(args.output/'request.json', json.dumps(request, ensure_ascii=False, indent=2))
             atomic_text(args.output/'README.md', '# 独立推断判定待执行\n\n'
