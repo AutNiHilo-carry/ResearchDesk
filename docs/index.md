@@ -56,3 +56,5 @@
 [修订预算提示真实对照](repair-budget-comparison.md)记录 off 与 snapshot-v1 的候选质量、用量及不晋升决定。
 
 [被拒候选联合推断核查](repair-inference-pilot.md)并列记录四句原逐行标签与独立模型意见，区分附件补充关联和正文引用质量。
+
+[前提正文单次修订](premise-body-pilot.md)记录未改善的引用指标、业务 rubric 漏检的长度约束及不晋升决定。
