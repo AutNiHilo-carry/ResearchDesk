@@ -11,7 +11,7 @@ from uuid import uuid4
 from dotenv import load_dotenv
 from .ledger import Ledger, now
 from .policy import ToolLimits
-from .model_budget import ModelBudgetExceeded, VerificationTailProtected, model_budget_for
+from .model_budget import ModelBudgetExceeded, VerificationTailProtected, model_budget_for, budget_snapshot
 from .report_policy import bound_prompt, prompt_text
 from .recovery import run_graph
 from .storage import RunLock, RecoveryError, atomic_text
@@ -37,6 +37,55 @@ class RepairDeferred(RecoveryError):
 VERIFICATION_TAIL_POLICY = 'repair-verification-tail-v1'
 TAIL_FALLBACK_REASONS = {'insufficient_budget_for_repair_and_verification',
                          'repair_generation_stopped_for_verification_budget'}
+
+
+BUDGET_CONTEXT_PROMPT = """应用提供了 budget_context：这是修订开始时的持久化预算快照，不是实时余额。
+model.generation_remaining 已扣除候选验证预留；每次使用工具后通常还需要下一次生成回合才能输出报告。
+请至少保留一个生成回合直接输出完整修订稿。若只剩一个生成回合，优先使用已有资料与 evidence ID 完成报告，避免再发起工具调用。
+优先复用已给出的证据，不重复读取或重复记录相同事实。需要新证据时，先考虑剩余工具和生成回合是否足够。
+未知余额为 null，不能当成无限额度。快照不会因恢复而刷新，实际权限与账本拦截始终优先。
+预算不足以建立支持时，保留业务要求、收窄无据断言或明确证据不足，不编造引用，也不通过删关键要求换分。
+只输出完整修订报告，不输出行动计划或预算教学。
+"""
+
+
+def budget_context_policy(version):
+    if version == 'off':
+        return {'version': 'off'}
+    if version == 'snapshot-v1':
+        return dict(version=version, prompt_sha256=digest(BUDGET_CONTEXT_PROMPT))
+    raise RecoveryError('Unknown repair budget-context policy.')
+
+
+def validate_budget_context(state, metadata, destination):
+    policy = state.get('budget_context_policy', {'version': 'off'})
+    if (not isinstance(policy, dict) or policy != budget_context_policy(policy.get('version'))
+            or metadata.get('budget_context_policy', {'version': 'off'}) != policy):
+        raise RecoveryError('Saved repair budget-context policy changed.')
+    path = destination / 'repair-input.json'
+    if policy['version'] == 'off':
+        if 'repair_input_sha256' in state:
+            raise RecoveryError('Repair budget-context binding cannot be downgraded.')
+    elif path.exists():
+        if digest(path.read_text(encoding='utf-8')) != state.get('repair_input_sha256'):
+            raise RecoveryError('Frozen repair budget context/input changed or is unbound.')
+    elif state['rounds_used'] or 'repair_input_sha256' in state:
+        raise RecoveryError('Frozen repair budget input is missing.')
+    return policy['version']
+
+
+def budget_context_snapshot(ledger, metadata):
+    limits = ToolLimits(**metadata['tool_policy'])
+    with ledger.store.transaction() as connection:
+        model = budget_snapshot(connection)
+        counts = dict(connection.execute('SELECT name,value FROM counters'))
+    return dict(version='snapshot-v1', model=None if model is None else dict(
+        limit=model['limit'], admitted_calls=model['reserved'], remaining=model['remaining'],
+        verification_reserved=model.get('verification_slots_held', 0),
+        generation_remaining=model.get('generation_remaining', model['remaining'])),
+        tools=dict(limit=limits.max_calls, used=counts['calls'], remaining=max(0, limits.max_calls-counts['calls']),
+                   provider_request_limit=limits.max_provider_requests, provider_requests_used=counts['requests'],
+                   provider_requests_remaining=max(0, limits.max_provider_requests-counts['requests'])))
 
 
 def measures(rows):
@@ -124,7 +173,8 @@ class AuditedJudge:
         return output
 
 
-def fork_run(source, destination):
+def fork_run(source, destination, *, budget_context=None):
+    policy = budget_context_policy('off' if budget_context is None else budget_context)
     destination.mkdir(parents=True, exist_ok=False)
     with RunLock(source):
         report, _, _, metadata = load_run(source)
@@ -145,17 +195,24 @@ def fork_run(source, destination):
     metadata = dict(metadata, status="repairing", mode="repair_candidate",
                     parent_run_directory=str(source.resolve()), original_report_sha256=digest(report))
     metadata.pop("report", None)
+    metadata.pop('budget_context_policy', None)  # A new fork must not inherit the parent's input policy implicitly.
+    if policy['version'] != 'off':
+        metadata['budget_context_policy'] = policy
     atomic_text(destination / "run.json", json.dumps(metadata, ensure_ascii=False, indent=2))
     state = dict(version=1, round_limit=1, rounds_used=0, checks_started=[], status="prepared",
                  verification_tail_policy=VERIFICATION_TAIL_POLICY,
                  original_report_sha256=digest(report), source_run_directory=str(source.resolve()),
                  started_at=now(), repair_prompt_sha256=digest(prompt_text(REPAIR_PROMPT, "repair", metadata.get("report_policy"))))
+    if policy['version'] != 'off':
+        state['budget_context_policy'] = policy
     atomic_text(destination / "repair-state.json", json.dumps(state, ensure_ascii=False, indent=2))
 
 
-def repair_run(source, destination, *, feedback_rows=None, checker=None, graph_runner=run_graph, resume=False):
+def repair_run(source, destination, *, feedback_rows=None, checker=None, graph_runner=run_graph, resume=False, budget_context=None):
+    if resume and budget_context is not None:
+        raise RecoveryError('Resume cannot replace the saved repair budget context.')
     if not resume:
-        fork_run(source, destination)
+        fork_run(source, destination, budget_context=budget_context)
     with RunLock(destination):
         state_path = destination / "repair-state.json"
         state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -165,6 +222,7 @@ def repair_run(source, destination, *, feedback_rows=None, checker=None, graph_r
         if state.get('verification_tail_policy',VERIFICATION_TAIL_POLICY) != VERIFICATION_TAIL_POLICY:
             raise RecoveryError('Unsupported repair verification-tail policy.')
         metadata = json.loads((destination / "run.json").read_text(encoding="utf-8"))
+        context_version = validate_budget_context(state, metadata, destination)
         expected_repair = prompt_text(REPAIR_PROMPT, "repair", metadata.get("report_policy"))
         if state.get("repair_prompt_sha256") != digest(expected_repair):
             raise RecoveryError("Saved repair prompt does not match the selected report policy.")
@@ -242,15 +300,26 @@ def repair_run(source, destination, *, feedback_rows=None, checker=None, graph_r
                         sources=[{key: row.get(key) for key in ("id", "title", "location", "kind")}
                                  for row in ledger.sources.values()],
                         evidence=list(ledger.evidence.values()))
-                    message = repair_prompt + "\n" + json.dumps(data, ensure_ascii=False)
+                    advisory = ''
+                    if context_version == 'snapshot-v1':
+                        data['budget_context'] = budget_context_snapshot(ledger, metadata)
+                        advisory = BUDGET_CONTEXT_PROMPT + '\n'
+                    message = repair_prompt + "\n" + advisory + json.dumps(data, ensure_ascii=False)
                     prepared = {"messages": list(initial["messages"]) + [
                         {"role": "assistant", "content": original}, {"role": "user", "content": message}]}
                     if len(json.dumps(prepared, ensure_ascii=False)) > 60000:
                         raise VerificationError("Repair input exceeds character budget.")
-                    atomic_text(repair_input, json.dumps(prepared, ensure_ascii=False))
+                    serialized = json.dumps(prepared, ensure_ascii=False)
+                    atomic_text(repair_input, serialized)
+                    if context_version == 'snapshot-v1':
+                        state['repair_input_sha256'] = digest(serialized)
+                        save()
                 state.update(rounds_used=1, status="repair_started")
                 save()
-                prepared = json.loads(repair_input.read_text(encoding="utf-8"))
+                input_text = repair_input.read_text(encoding='utf-8')
+                if context_version == 'snapshot-v1' and digest(input_text) != state.get('repair_input_sha256'):
+                    raise RecoveryError('Frozen repair budget input changed before generation.')
+                prepared = json.loads(input_text)
                 options = {} if metadata.get("allowed_tools") is None else {"allowed_tools": metadata["allowed_tools"]}
                 candidate_path = destination / "revisions" / "candidate.md"
                 if candidate_path.is_file():
@@ -323,8 +392,9 @@ def main():
     parser.add_argument("--destination", type=Path)
     parser.add_argument("--output", type=Path, default=Path("runs/repairs"))
     parser.add_argument("--feedback", type=Path)
+    parser.add_argument('--budget-context', choices=['off', 'snapshot-v1'])
     args = parser.parse_args()
-    if bool(args.source) == bool(args.resume) or (args.resume and (args.destination or args.feedback)):
+    if bool(args.source) == bool(args.resume) or (args.resume and (args.destination or args.feedback or args.budget_context is not None)):
         parser.error("Use one source directory or --resume CANDIDATE_DIRECTORY.")
     load_dotenv()
     if not os.getenv("DEEPSEEK_API_KEY", "").strip():
@@ -333,7 +403,7 @@ def main():
     destination = args.resume or args.destination or args.output / uuid4().hex
     try:
         feedback = json.loads(args.feedback.read_text(encoding="utf-8")) if args.feedback else None
-        state = repair_run(args.source, destination, feedback_rows=feedback, resume=bool(args.resume))
+        state = repair_run(args.source, destination, feedback_rows=feedback, resume=bool(args.resume), budget_context=args.budget_context)
         print(f"Repair artifacts: {destination}")
         print(json.dumps(state["selection"], ensure_ascii=False))
         return 0 if state["selection"]["accepted"] else 3

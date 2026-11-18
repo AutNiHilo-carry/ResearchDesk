@@ -50,3 +50,5 @@
 [逐行引用缺口视图](citation-gap-view.md)复用已有模型标签，离线定位具体句子与证据关系。
 
 [外部副作用题定向修订](targeted-repair-budget-result.md)记录反馈复用、实际预算停止和原稿保留结果。
+
+[候选修订预算快照](repair-budget-context.md)说明显式启用、输入冻结、恢复拒绝及与硬预算的边界。
