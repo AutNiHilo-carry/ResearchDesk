@@ -54,3 +54,5 @@
 [候选修订预算快照](repair-budget-context.md)说明显式启用、输入冻结、恢复拒绝及与硬预算的边界。
 
 [修订预算提示真实对照](repair-budget-comparison.md)记录 off 与 snapshot-v1 的候选质量、用量及不晋升决定。
+
+[被拒候选联合推断核查](repair-inference-pilot.md)并列记录四句原逐行标签与独立模型意见，区分附件补充关联和正文引用质量。
