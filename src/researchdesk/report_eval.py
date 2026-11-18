@@ -13,6 +13,7 @@ from .storage import RecoveryError, atomic_text
 from .task_eval import TASK_SUFFIX, evaluate_batch, load_taskset, run_task, summary
 from .task_grading import TASK_PROMPT
 from .verification import SYSTEM_PROMPT_V2, digest
+from .report_constraints import policy as constraint_policy
 
 
 def code_hashes():
@@ -46,6 +47,7 @@ def controls(plan):
         source_code_sha256=code_hashes(), report_policies={v: policy_spec(v) for v in ("v1", "v2")},
         task_suffix_sha256=digest(TASK_SUFFIX), task_judge_sha256=digest(TASK_PROMPT),
         evidence_judge_sha256=digest(SYSTEM_PROMPT_V2), context_mode="full",
+        constraint_policy=constraint_policy(),
         tool_policy=dict(max_calls=10, max_provider_requests=0, max_retries=0),
         max_sdk_requests=2*len(tasks)*plan["max_model_calls"]+4,
         request_limit_scope="generation per task plus at most two batch graders per arm; no SDK retries; not a token or monetary cap")

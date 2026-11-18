@@ -221,6 +221,7 @@ def test_selected_corpus_validation_is_not_weakened(review_case, tmp_path, mutat
 def gap_evaluation(review_case):
     # Explicit synthetic labels: two supported lines and one uncited inference.
     from researchdesk.task_eval import quality_metrics
+    from researchdesk.report_constraints import check_body
     from researchdesk.verification import load_run, split_units, prepare, assess
     evaluation, dataset, _ = review_case
     run = evaluation / 'tasks/case/research' / ('a' * 32)
@@ -243,6 +244,8 @@ def gap_evaluation(review_case):
     result = json.loads((evaluation / 'result.json').read_text(encoding='utf-8'))
     result['quality_input_sha256'] = fingerprint
     result['tasks'][0]['quality'] = quality_metrics(quality['units'])
+    # This fixture intentionally creates a new frozen report and all its bindings.
+    result['tasks'][0]['constraints'] = check_body(load_run(run)[0])
     (evaluation / 'result.json').write_text(json.dumps(result), encoding='utf-8')
     return evaluation, dataset, run
 

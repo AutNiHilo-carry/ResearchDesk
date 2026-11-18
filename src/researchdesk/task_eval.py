@@ -19,6 +19,7 @@ from .verification import (ModelJudge, VerificationError, assess, digest, failur
                            load_run, prepare, split_units, markdown as quality_markdown)
 from .task_grading import TaskJudge, grade_tasks
 from .run_metrics import run_metrics
+from .report_constraints import check_body, policy as constraint_policy
 
 TASK_SUFFIX = ("\n仅使用附带的本地资料，不进行外部检索。正文控制在200字以内。"
                "每个事实单独一行并紧跟完整证据引用，纯建议和证据不足声明单独成行。"
@@ -171,6 +172,31 @@ def assessment(record, batch_status):
     return dict(scoring_status=scoring, model_gate=gate, human_review="pending", final_acceptance="pending")
 
 
+def application_assessment(record, batch_status):
+    """A separate application check; never relabel historical model scores."""
+    model = assessment(record, batch_status)['model_gate']
+    check = record.get('constraints')
+    if check is None:
+        constraint = 'not_checked'
+    elif (not isinstance(check, dict) or check.get('policy') != constraint_policy()
+          or type(check.get('counted_chars')) is not int or check['counted_chars'] < 0
+          or not isinstance(check.get('body_sha256'), str)
+          or not re.fullmatch('[0-9a-f]{64}', check['body_sha256'])
+          or check.get('status') not in {'passed', 'failed', 'invalid'}
+          or check.get('passed') is not (check.get('status') == 'passed')
+          or (check['status'] == 'passed' and not 0 < check['counted_chars'] <= 200)
+          or (check['status'] == 'failed' and check['counted_chars'] <= 200)):
+        constraint = 'invalid'
+    else:
+        constraint = check['status']
+    if record.get('generation_status') != 'completed' or model == 'failed' or constraint in {'failed', 'invalid'}:
+        gate = 'failed'
+    else:
+        gate = 'passed' if model == constraint == 'passed' else 'unknown'
+    return dict(constraint_gate=constraint, application_gate=gate,
+                human_review='pending', final_acceptance='pending')
+
+
 def evaluate_batch(data, tasks, documents, artifact, *, runner=run_task, model_name="deepseek-flash",
                    task_judge=None, evidence_judge=None, timeout=180):
     evaluation_started = time.monotonic()
@@ -198,10 +224,12 @@ def evaluate_batch(data, tasks, documents, artifact, *, runner=run_task, model_n
                   model_settings=dict(temperature=0, generator_max_tokens=4096, evaluator_max_tokens=8192),
                   thresholds=data["thresholds"], corpus_hashes={name: row["sha256"] for name, row in documents.items()},
                   task_prompt_suffix_sha256=digest(TASK_SUFFIX), task_timeout_seconds=timeout,
+                  constraint_policy=constraint_policy(),
                   tasks=[], promotion="human_review_required", human_review="pending", final_acceptance="pending")
     def save():
         for row in result["tasks"]:
             row["assessment"] = assessment(row, result["status"])
+            row['application_assessment'] = application_assessment(row, result['status'])
         atomic_text(artifact / "result.json", json.dumps(result, ensure_ascii=False, indent=2))
     save()
     for index, task in enumerate(tasks, 1):
@@ -222,6 +250,7 @@ def evaluate_batch(data, tasks, documents, artifact, *, runner=run_task, model_n
             if record.get("model") != model_name:
                 raise VerificationError("Generator model differs from the frozen evaluation configuration.")
             report, evidence, sources, _ = load_run(Path(record["run_directory"]))
+            record['constraints'] = check_body(report)
             units = split_units(report)
         except Exception as error:
             record.update(generation_status="invalid_artifacts", error_type=type(error).__name__)
@@ -307,14 +336,23 @@ def summary(result, *, quality_details=False):
              "Human review: pending; Final acceptance: pending（本入口不执行人工验收）。",
              "valid仅表示评分合同通过；model_gate为模型辅助判定，不代表人工验收。",
              "invalid表示评分无效；not_scored表示生成未完成；unknown不计为模型通过。", "",
-             "| Task | Generation | Scoring | Model gate | Citation precision | Coverage | Tokens | Seconds | Retries |",
-             "|---|---|---|---|---:|---:|---:|---:|---:|"]
+             "Task Success Rate 保留原模型口径，不含长度约束；应用检查单独合并模型与确定性检查。",
+             "旧结果 not_checked 不自动补判为通过；应用检查通过仍不是人工验收。", "",
+             "| Task | Generation | Scoring | Model gate | Body limit | Application gate | Citation precision | Coverage | Tokens | Seconds | Retries |",
+             "|---|---|---|---|---|---|---:|---:|---:|---:|---:|"]
+    counts = []
     for row in result["tasks"]:
         metrics, quality = row.get("generation_metrics", {}), row.get("quality", {})
         state = assessment(row, result["status"])
+        app = application_assessment(row, result['status'])
         lines.append(f"| {row['task_id']} | {row['generation_status']} | {state['scoring_status']} | {state['model_gate']} "
+                     f"| {app['constraint_gate']} | {app['application_gate']} "
                      f"| {quality.get('citation_precision')} | {quality.get('evidence_coverage')} "
                      f"| {metrics.get('total_tokens')} | {row.get('elapsed_seconds')} | {metrics.get('retry_count')} |")
+        if isinstance(row.get('constraints'), dict):
+            check = row['constraints']
+            counts.append(f"Body count {row['task_id']}: {check.get('counted_chars')}/200 Unicode codepoints; policy body-length-v1.")
+    lines += [''] + counts
     lines += ["", f"Generation tokens: {result.get('generation_total_tokens')}",
               f"Evaluator tokens: {result.get('evaluator_total_tokens')}",
               "Monetary cost and Recovery Rate: N/A (not measured by this batch).", ""]
@@ -331,6 +369,11 @@ def saved_quality(evaluation, dataset, result):
     packet = build_packet(evaluation, dataset)
     units, evidence, sources = [], {}, {}
     for task in packet['tasks']:
+        if task.get('generation_status') == 'completed':
+            recorded = next(row for row in result['tasks'] if row['task_id'] == task['task_id'])
+            if ('constraint_policy' in result or 'constraints' in recorded):
+                if result.get('constraint_policy') != constraint_policy() or recorded.get('constraints') != check_body(task['report']):
+                    raise VerificationError('Saved body constraint differs from the frozen report or policy.')
         units.extend(task.get('units', []))
         evidence.update(task.get('evidence', {}))
         sources.update(task.get('sources', {}))
