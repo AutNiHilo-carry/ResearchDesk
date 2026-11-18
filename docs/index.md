@@ -52,3 +52,5 @@
 [外部副作用题定向修订](targeted-repair-budget-result.md)记录反馈复用、实际预算停止和原稿保留结果。
 
 [候选修订预算快照](repair-budget-context.md)说明显式启用、输入冻结、恢复拒绝及与硬预算的边界。
+
+[修订预算提示真实对照](repair-budget-comparison.md)记录 off 与 snapshot-v1 的候选质量、用量及不晋升决定。
