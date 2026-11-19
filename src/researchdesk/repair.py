@@ -13,6 +13,7 @@ from .ledger import Ledger, now
 from .policy import ToolLimits
 from .model_budget import ModelBudgetExceeded, VerificationTailProtected, model_budget_for, budget_snapshot
 from .report_policy import bound_prompt, prompt_text
+from .report_constraints import check_body, policy as body_policy, counting_instruction
 from .recovery import run_graph
 from .storage import RunLock, RecoveryError, atomic_text
 from .verification import (ModelJudge, VerificationError, assess, digest, failure_diagnostics,
@@ -32,6 +33,57 @@ REPAIR_PROMPT = """对上一份报告进行且仅进行一次证据绑定修订�
 
 class RepairDeferred(RecoveryError):
     pass
+
+
+def body_limit_policy(max_chars):
+    try:
+        return dict(version='repair-body-limit-v1', constraint_policy=body_policy(max_chars),
+                    instruction_sha256=digest(counting_instruction(max_chars)))
+    except (TypeError, ValueError) as error:
+        raise RecoveryError('Invalid repair body limit.') from error
+
+
+def validate_body_limit(state, metadata, directory):
+    spec = state.get('body_limit_policy')
+    if metadata.get('body_limit_policy') != spec:
+        raise RecoveryError('Repair body policy bindings differ.')
+    connection = sqlite3.connect((directory/'application.sqlite3').resolve().as_uri()+'?mode=ro',uri=True)
+    try:
+        row = connection.execute("SELECT payload FROM records WHERE kind='repair_body_policy' AND id='singleton'").fetchone()
+    finally:
+        connection.close()
+    if (json.loads(row[0]) if row is not None else None) != spec:
+        raise RecoveryError('Repair body policy differs from durable state.')
+    if spec is None:
+        if 'body_limit_input_sha256' in state:
+            raise RecoveryError('Repair body policy cannot be downgraded.')
+        return None
+    if (not isinstance(spec,dict) or not isinstance(spec.get('constraint_policy'),dict)
+            or spec != body_limit_policy(spec['constraint_policy'].get('max_chars'))):
+        raise RecoveryError('Unsupported repair body policy or instruction drift.')
+    path = directory/'repair-input.json'
+    if path.exists():
+        if digest(path.read_text(encoding='utf-8')) != state.get('body_limit_input_sha256'):
+            raise RecoveryError('Frozen repair body input changed or is unbound.')
+    elif state['rounds_used'] or 'body_limit_input_sha256' in state:
+        raise RecoveryError('Frozen repair body input is missing.')
+    if state['status'] == 'completed':
+        limit = spec['constraint_policy']['max_chars']
+        bodies = {}
+        for name,key in (('original','original_report_sha256'),('candidate','candidate_sha256')):
+            if key not in state:
+                continue
+            body = (directory/'revisions'/f'{name}.md').read_text(encoding='utf-8')
+            if digest(body) != state[key] or check_body(body,max_chars=limit) != state.get(name+'_body_constraints'):
+                raise RecoveryError('Completed repair body or constraint receipt changed.')
+            bodies[name] = body
+        chosen = state['selection']['selected']
+        if chosen not in bodies or digest((directory/'draft.md').read_text(encoding='utf-8')) != digest(bodies[chosen]):
+            raise RecoveryError('Selected repair body changed.')
+        expected = check_body(bodies[chosen],max_chars=limit)
+        if state.get('selected_body_constraints') != expected or metadata.get('body_constraints') != expected:
+            raise RecoveryError('Selected repair body receipt changed.')
+    return spec['constraint_policy']['max_chars']
 
 
 VERIFICATION_TAIL_POLICY = 'repair-verification-tail-v1'
@@ -173,8 +225,9 @@ class AuditedJudge:
         return output
 
 
-def fork_run(source, destination, *, budget_context=None):
+def fork_run(source, destination, *, budget_context=None, body_limit=None):
     policy = budget_context_policy('off' if budget_context is None else budget_context)
+    limit_policy = body_limit_policy(body_limit) if body_limit is not None else None
     destination.mkdir(parents=True, exist_ok=False)
     with RunLock(source):
         report, _, _, metadata = load_run(source)
@@ -185,6 +238,11 @@ def fork_run(source, destination, *, budget_context=None):
         dst = sqlite3.connect(destination / "application.sqlite3")
         try:
             src.backup(dst)
+            # A fresh fork has its own explicit application policy; inherited budgets stay intact.
+            dst.execute("DELETE FROM records WHERE kind='repair_body_policy'")
+            if limit_policy is not None:
+                dst.execute("INSERT INTO records VALUES ('repair_body_policy','singleton',?)",(json.dumps(limit_policy),))
+            dst.commit()
         finally:
             src.close()
             dst.close()
@@ -196,6 +254,10 @@ def fork_run(source, destination, *, budget_context=None):
                     parent_run_directory=str(source.resolve()), original_report_sha256=digest(report))
     metadata.pop("report", None)
     metadata.pop('budget_context_policy', None)  # A new fork must not inherit the parent's input policy implicitly.
+    metadata.pop('body_limit_policy', None)
+    metadata.pop('body_constraints', None)
+    if limit_policy is not None:
+        metadata['body_limit_policy'] = limit_policy
     if policy['version'] != 'off':
         metadata['budget_context_policy'] = policy
     atomic_text(destination / "run.json", json.dumps(metadata, ensure_ascii=False, indent=2))
@@ -205,14 +267,18 @@ def fork_run(source, destination, *, budget_context=None):
                  started_at=now(), repair_prompt_sha256=digest(prompt_text(REPAIR_PROMPT, "repair", metadata.get("report_policy"))))
     if policy['version'] != 'off':
         state['budget_context_policy'] = policy
+    if limit_policy is not None:
+        state['body_limit_policy'] = limit_policy
     atomic_text(destination / "repair-state.json", json.dumps(state, ensure_ascii=False, indent=2))
 
 
-def repair_run(source, destination, *, feedback_rows=None, checker=None, graph_runner=run_graph, resume=False, budget_context=None):
+def repair_run(source, destination, *, feedback_rows=None, checker=None, graph_runner=run_graph, resume=False, budget_context=None, body_limit=None):
     if resume and budget_context is not None:
         raise RecoveryError('Resume cannot replace the saved repair budget context.')
+    if resume and body_limit is not None:
+        raise RecoveryError('Resume cannot replace the saved repair body limit.')
     if not resume:
-        fork_run(source, destination, budget_context=budget_context)
+        fork_run(source, destination, budget_context=budget_context, body_limit=body_limit)
     with RunLock(destination):
         state_path = destination / "repair-state.json"
         state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -223,6 +289,7 @@ def repair_run(source, destination, *, feedback_rows=None, checker=None, graph_r
             raise RecoveryError('Unsupported repair verification-tail policy.')
         metadata = json.loads((destination / "run.json").read_text(encoding="utf-8"))
         context_version = validate_budget_context(state, metadata, destination)
+        limit = validate_body_limit(state, metadata, destination)
         expected_repair = prompt_text(REPAIR_PROMPT, "repair", metadata.get("report_policy"))
         if state.get("repair_prompt_sha256") != digest(expected_repair):
             raise RecoveryError("Saved repair prompt does not match the selected report policy.")
@@ -240,6 +307,10 @@ def repair_run(source, destination, *, feedback_rows=None, checker=None, graph_r
             state.update(status="completed", selection=decision, original_metrics=before["metrics"],completed_at=now())
             metadata.update(status="completed",finished_at=now(),report=str(destination / "report.md"),
                             repair=decision,repair_rounds_used=state["rounds_used"])
+            if limit is not None:
+                selected = state[decision['selected']+'_body_constraints']
+                state['selected_body_constraints'] = selected
+                metadata['body_constraints'] = selected
             atomic_text(destination / "run.json",json.dumps(metadata,ensure_ascii=False,indent=2))
             save()
             return state
@@ -249,6 +320,9 @@ def repair_run(source, destination, *, feedback_rows=None, checker=None, graph_r
                 raise RecoveryError("Saved repair prompt does not match the pinned report policy.")
             # Always keep a structurally valid original as the fallback report.
             ledger.save_report(original)
+            if limit is not None:
+                state['original_body_constraints'] = check_body(original,max_chars=limit)
+                save()
             judge = AuditedJudge(ledger, checker or ModelJudge(metadata["model"], prompt_version="v2"))
             model_budget = judge.model_budget
             def check(label, report, frozen=None):
@@ -279,7 +353,7 @@ def repair_run(source, destination, *, feedback_rows=None, checker=None, graph_r
                     prompt_sha256=getattr(judge, "prompt_sha256", None)), ensure_ascii=False, indent=2))
                 return result
             before = check("original", original, feedback_rows)
-            if selection(before, before)["accepted"]:
+            if selection(before, before)["accepted"] and (limit is None or state['original_body_constraints']['passed']):
                 decision = dict(accepted=True, reasons=["already_meets_support_gate"], selected="original",
                                 review_required=True)
             else:
@@ -301,9 +375,12 @@ def repair_run(source, destination, *, feedback_rows=None, checker=None, graph_r
                                  for row in ledger.sources.values()],
                         evidence=list(ledger.evidence.values()))
                     advisory = ''
+                    if limit is not None:
+                        data['body_constraint'] = state['original_body_constraints']
+                        advisory = '本次修订还须满足以下应用正文合同：\n'+counting_instruction(limit)+'\n'
                     if context_version == 'snapshot-v1':
                         data['budget_context'] = budget_context_snapshot(ledger, metadata)
-                        advisory = BUDGET_CONTEXT_PROMPT + '\n'
+                        advisory += BUDGET_CONTEXT_PROMPT + '\n'
                     message = repair_prompt + "\n" + advisory + json.dumps(data, ensure_ascii=False)
                     prepared = {"messages": list(initial["messages"]) + [
                         {"role": "assistant", "content": original}, {"role": "user", "content": message}]}
@@ -313,12 +390,17 @@ def repair_run(source, destination, *, feedback_rows=None, checker=None, graph_r
                     atomic_text(repair_input, serialized)
                     if context_version == 'snapshot-v1':
                         state['repair_input_sha256'] = digest(serialized)
+                    if limit is not None:
+                        state['body_limit_input_sha256'] = digest(serialized)
+                    if context_version == 'snapshot-v1' or limit is not None:
                         save()
                 state.update(rounds_used=1, status="repair_started")
                 save()
                 input_text = repair_input.read_text(encoding='utf-8')
                 if context_version == 'snapshot-v1' and digest(input_text) != state.get('repair_input_sha256'):
                     raise RecoveryError('Frozen repair budget input changed before generation.')
+                if limit is not None and digest(input_text) != state.get('body_limit_input_sha256'):
+                    raise RecoveryError('Frozen repair body input changed before generation.')
                 prepared = json.loads(input_text)
                 options = {} if metadata.get("allowed_tools") is None else {"allowed_tools": metadata["allowed_tools"]}
                 candidate_path = destination / "revisions" / "candidate.md"
@@ -346,6 +428,8 @@ def repair_run(source, destination, *, feedback_rows=None, checker=None, graph_r
                     content = normalized
                     atomic_text(candidate_path, content)
                 state["candidate_sha256"] = digest(content)
+                if limit is not None:
+                    state['candidate_body_constraints'] = check_body(content,max_chars=limit)
                 save()
                 atomic_text(destination / "revisions" / "changes.diff", "".join(difflib.unified_diff(
                     original.splitlines(keepends=True), content.splitlines(keepends=True),
@@ -358,12 +442,16 @@ def repair_run(source, destination, *, feedback_rows=None, checker=None, graph_r
                     decision = dict(accepted=False, reasons=["candidate_citation_structure_invalid"],
                                     selected="original", review_required=True)
                 else:
-                    after = check("candidate", content)
-                    decision = selection(before, after)
-                    decision["selected"] = "candidate" if decision["accepted"] else "original"
-                    state["candidate_metrics"] = after["metrics"]
-                    if decision["accepted"]:
-                        ledger.save_report(content)
+                    if limit is not None and not state['candidate_body_constraints']['passed']:
+                        decision = dict(accepted=False,reasons=['candidate_body_constraint_failed'],
+                                        selected='original',review_required=True)
+                    else:
+                        after = check("candidate", content)
+                        decision = selection(before, after)
+                        decision["selected"] = "candidate" if decision["accepted"] else "original"
+                        state["candidate_metrics"] = after["metrics"]
+                        if decision["accepted"]:
+                            ledger.save_report(content)
             if model_budget is not None:
                 model_budget.release_verification(tail_id)
             return complete(decision,before)
@@ -393,9 +481,15 @@ def main():
     parser.add_argument("--output", type=Path, default=Path("runs/repairs"))
     parser.add_argument("--feedback", type=Path)
     parser.add_argument('--budget-context', choices=['off', 'snapshot-v1'])
+    parser.add_argument('--body-limit',type=int,help='Explicit body codepoint limit; default off; frozen for resume')
     args = parser.parse_args()
-    if bool(args.source) == bool(args.resume) or (args.resume and (args.destination or args.feedback or args.budget_context is not None)):
+    if bool(args.source) == bool(args.resume) or (args.resume and (args.destination or args.feedback or args.budget_context is not None or args.body_limit is not None)):
         parser.error("Use one source directory or --resume CANDIDATE_DIRECTORY.")
+    if args.body_limit is not None:
+        try:
+            body_limit_policy(args.body_limit)
+        except RecoveryError:
+            parser.error('body-limit must be 1..100000.')
     load_dotenv()
     if not os.getenv("DEEPSEEK_API_KEY", "").strip():
         print("Missing DEEPSEEK_API_KEY.")
@@ -403,7 +497,7 @@ def main():
     destination = args.resume or args.destination or args.output / uuid4().hex
     try:
         feedback = json.loads(args.feedback.read_text(encoding="utf-8")) if args.feedback else None
-        state = repair_run(args.source, destination, feedback_rows=feedback, resume=bool(args.resume), budget_context=args.budget_context)
+        state = repair_run(args.source, destination, feedback_rows=feedback, resume=bool(args.resume), budget_context=args.budget_context,body_limit=args.body_limit)
         print(f"Repair artifacts: {destination}")
         print(json.dumps(state["selection"], ensure_ascii=False))
         return 0 if state["selection"]["accepted"] else 3

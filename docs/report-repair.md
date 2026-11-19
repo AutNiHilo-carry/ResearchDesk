@@ -36,3 +36,24 @@
 ## 可选预算提示
 
 新修订可显式启用 --budget-context snapshot-v1，向模型提供起始生成/验证/工具额度快照，恢复仍复用原输入并由实时账本拦截。默认 off，尚未证明质量收益；见 [修订预算上下文](repair-budget-context.md)。
+
+## 可选正文上限反馈
+
+```powershell
+.\.venv\Scripts\python.exe -m researchdesk.repair runs/<原RunID> --body-limit 200
+.\.venv\Scripts\python.exe -m researchdesk.repair --resume runs/repairs/<候选RunID>
+```
+
+`--body-limit` 显式接受1到100000个码点，默认关闭，只接入直接修订入口。原稿即使通过引用门槛，只要没有满足该上限，也会进入至多一轮修订。反馈包含原始计数、失败原因和[统一计数合同](body-constraints.md)，仍要求保留业务要求、受支持事实和真实限制；不自动截断、删句或追加第二轮。
+
+候选先保留原文、规范化记录和diff，再独立检查完整正文。仍超长或计数无效时以 candidate_body_constraint_failed 拒绝，不发起候选的付费语义验证；缺少 candidate-quality.json 表示本分支明确跳过验证，不能按0分或未知远程结果补跑。若长度通过，仍按原引用结构、0.9/0.6门槛、非回退和已支持行数规则验证，不能只凭短就选中候选。
+
+原稿、候选和最终选择分别保存 original_body_constraints、candidate_body_constraints、selected_body_constraints；run.json 保存最终正文的 body_constraints。回退原稿也可能超长，此时产物仅为保留供复核的原稿，accepted=false / CLI返回3，不代表满足正文合同。status=completed 表示修订尝试结束，人工复核仍待完成。业务完整性仍须独立评价；长度加引用门槛不证明所有要求均已保留。
+
+原模型/工具预算继续继承。即使有确定性长度检查，生成前仍保留一份验证额度：额度不足就停止，不为“先试着缩短”花掉最后一次请求。候选因长度被拒时释放未花费的验证预留。反馈可复用原已保存标签，避免重付原稿验证，但原反馈必须与正文逐行绑定。
+
+上限与指令哈希同时绑定在修订状态、run.json 和候选 SQLite 的独立记录中；源数据库不改。修订输入只构造一次并保存 body_limit_input_sha256。恢复不能传 --body-limit 替换配置，文件缺失、未绑定输入、规则/指令变化或元数据降级都在模型请求前拒绝。完成后的恢复也重新核对原稿、候选、选中正文与计数回执，再返回已有结果，不重新发起模型调用。
+
+这些绑定用于本地一致性，不是防篡改签名。明确新建 fork 可选择新的上限或关闭检查，不隐式继承父修订的上限；它仍继承已消耗预算，不是重新获得调用额度。旧修订默认行为和 REPAIR_PROMPT 保持原样；没有给历史修订补造计数记录，也未改变普通工作流或配对修订入口的默认策略。
+
+本阶段使用脚本供应商和故障桩验证分支、预算释放和恢复拒绝，零真实模型 API。不证明能把真实超长稿压缩到合规，也不改变[两题真实对照](counting-contract-pilot.md)中已拒绝的结果。
