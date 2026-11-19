@@ -6,7 +6,7 @@
 
 用户提出问题 → 制定计划 → 搜索/读取资料 → 记录证据 → 比较方案 → 生成带引用报告 → 检查、有限修订或转待复核。
 
-**当前处于 Phase 3，工程机制已有验证，研究质量与独立人工标签仍待验收。** 详见 [2026-11-17 阶段交付记录](docs/status-20261117.md)。完整说明集中在 [文档导航](docs/index.md)，方向以 [项目约束](docs/direction.md) 为准。
+**当前处于 Phase 3，工程机制已有验证，研究质量与独立人工标签仍待验收。** 详见 [2026-11-19 阶段交付记录](docs/status-20261119.md)。完整说明集中在 [文档导航](docs/index.md)，方向以 [项目约束](docs/direction.md) 为准。
 
 ## 核心工程贡献
 
@@ -57,10 +57,11 @@ Copy-Item .env.example .env
 
 ## 当前验证证据
 
-- [最近一次代码验收](https://github.com/AutNiHilo-carry/ResearchDesk/actions/runs/44105355362)：578项离线测试、固定资料演示与源码目录外的 wheel 安装检查通过（2026-11-17 快照）。
+- [最近一次代码验收](https://github.com/AutNiHilo-carry/ResearchDesk/actions/runs/44551585768)：775项离线测试、固定资料演示与源码目录外的 wheel 安装检查通过（2026-11-19，代码快照 `430f568`）。
 - [恢复矩阵](docs/recovery-ci.md)、[模型响应/checkpoint 间隙](docs/model-response-gap.md)、[评分结果落盘间隙](docs/workflow-verification-gap.md)：不同窗口采用不同恢复语义，安全停止不等于研究任务完成。
 - [技术选型任务集](docs/technical-selection-eval.md)与[真实模型首轮结果](docs/technical-selection-pilot-v1.md)：生成流程可运行，评分有失败和争议，未证明候选策略更优。
 - [模型评分与验收边界](docs/model-assessment-boundary.md)、[人工复核材料](docs/technical-selection-human-review.md)：评分有效、模型门槛和最终验收分别记录，人工标签仍待填写。
+- [计数合同两题对照](docs/counting-contract-pilot.md)、[正文上限修订](docs/body-limit-live-repair.md)：保留应用验收失败与修订拒绝结果；[8组事实性标签材料](docs/abstention-label-review.md)仍待实际审阅。
 
 CI 不注入模型或搜索密钥。JUnit、固定机制结果和 wheel 按白名单归档，保留7天；依赖安装与构建需要网络。复现见 [CI 说明](docs/offline-ci.md) 和 [wheel 安装检查](docs/wheel-installation.md)。
 
