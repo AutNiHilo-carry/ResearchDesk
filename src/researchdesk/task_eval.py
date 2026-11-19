@@ -420,17 +420,92 @@ def render_summary(source, directory, *, with_quality=False, dataset=None):
         human_review="pending", final_acceptance="pending", **quality_binding), indent=2))
 
 
+def result_gate(result, *, gate='application'):
+    """Derive an automation verdict without trusting cached gate badges or batch rates."""
+    if gate not in {'model', 'application'}:
+        raise VerificationError('Choose a supported evaluation gate.')
+    tasks = result.get('tasks')
+    if not isinstance(tasks, list) or not tasks:
+        raise VerificationError('A nonempty task batch is required.')
+    ids = [row.get('task_id') for row in tasks]
+    if any(not isinstance(key, str) or not key for key in ids) or len(ids) != len(set(ids)):
+        raise VerificationError('Gate tasks must have distinct IDs.')
+    rows = []
+    for record in tasks:
+        model = assessment(record, result.get('status'))
+        if model['scoring_status'] == 'valid':
+            rubric = record['rubric']
+            if (type(rubric.get('rubric_passed')) is not bool
+                    or record['success'] != task_success(record, rubric, record['quality'], result['thresholds'])):
+                raise VerificationError('Recorded model success differs from the saved component checks.')
+        app = application_assessment(record, result.get('status'))
+        if (app['application_gate'] == 'passed' and result.get('constraint_policy') != constraint_policy()):
+            app['application_gate'] = 'unknown'
+        selected = model['model_gate'] if gate == 'model' else app['application_gate']
+        rows.append(dict(task_id=record['task_id'], model_gate=model['model_gate'],
+                         constraint_gate=app['constraint_gate'], application_gate=app['application_gate'],
+                         selected_gate=selected))
+    states = [row['selected_gate'] for row in rows]
+    status = ('failed' if 'failed' in states else 'passed'
+              if result.get('status') == 'complete' and all(value == 'passed' for value in states) else 'unknown')
+    return dict(version='evaluation-gate-v1', gate=gate, status=status, tasks=rows,
+                exit_code=0 if status == 'passed' else 3,
+                human_review='pending', final_acceptance='pending')
+
+
+def check_saved_result(source, dataset, directory, *, gate='application'):
+    """Validate frozen body/labels offline before issuing a new, separate gate verdict."""
+    raw = source.read_bytes()
+    result = json.loads(raw.decode('utf-8'))
+    _, binding = saved_quality(source.parent, dataset, result)
+    # Check business labels against their frozen report and criterion IDs as well.
+    from .review import build_packet
+    packet = build_packet(source.parent, dataset)
+    for task in packet['tasks']:
+        if task['generation_status'] != 'completed':
+            continue
+        record = next(row for row in result['tasks'] if row['task_id'] == task['task_id'])
+        rubric = record.get('rubric')
+        if not isinstance(rubric, dict) or not isinstance(rubric.get('criteria'), list):
+            raise VerificationError('Missing saved business labels.')
+        payload = dict(tasks=[dict(task_id=task['task_id'], report=task['report'], criteria=task['criteria'])])
+        def labels(_):
+            return dict(tasks=[dict(task_id=task['task_id'], criteria=rubric['criteria'])])
+        checked = grade_tasks(payload, labels)[task['task_id']]
+        if rubric != checked or result.get('task_grades', {}).get(task['task_id']) != checked:
+            raise VerificationError('Saved business labels or derived gate changed.')
+    verdict = result_gate(result, gate=gate)
+    if source.read_bytes() != raw:
+        raise VerificationError('Result changed during gate verification.')
+    directory.mkdir(parents=True, exist_ok=False)
+    atomic_text(directory/'gate.json', json.dumps(verdict, ensure_ascii=False, indent=2))
+    atomic_text(directory/'summary.md', summary(result))
+    atomic_text(directory/'provenance.json', json.dumps(dict(mode='offline_gate', api_requests=0,
+        source_sha256=hashlib.sha256(raw).hexdigest(), scoring_recomputed=False,
+        scope='revalidated_saved_labels_and_body_constraints_not_new_semantic_scoring', **binding), indent=2))
+    return verdict
+
+
 def main():
     parser = argparse.ArgumentParser(description="Controlled-corpus end-to-end research evaluation")
     parser.add_argument("--dataset", type=Path, default=Path("evals/research-tasks-v1.json"))
     parser.add_argument("--output", type=Path, default=Path("runs/task-evaluations"))
-    parser.add_argument("--limit", type=int, default=3)
-    parser.add_argument("--timeout", type=float, default=180)
-    parser.add_argument("--summarize", type=Path, help="Render an existing result offline; no grading or credentials")
+    parser.add_argument("--limit", type=int)
+    parser.add_argument("--timeout", type=float)
+    offline = parser.add_mutually_exclusive_group()
+    offline.add_argument("--summarize", type=Path, help="Render an existing result offline; no grading or credentials")
+    offline.add_argument('--check-result', type=Path, help='Validate saved inputs and issue a separate offline gate verdict')
+    parser.add_argument('--gate', choices=['model', 'application'], help='Automation exit gate; check-result defaults to application, new evaluation to model')
     parser.add_argument('--with-quality', action='store_true', help='Include bound saved citation details with --summarize')
     args = parser.parse_args()
     if args.with_quality and not args.summarize:
         parser.error('--with-quality requires --summarize.')
+    if args.summarize and args.gate is not None:
+        parser.error('--summarize is formatting only; use --check-result for gate exit codes.')
+    if args.check_result and (args.limit is not None or args.timeout is not None):
+        parser.error('--check-result validates the whole saved batch; generation controls are not accepted.')
+    args.limit = args.limit if args.limit is not None else 3
+    args.timeout = args.timeout if args.timeout is not None else 180
     if not 1 <= args.limit <= 10 or not math.isfinite(args.timeout) or not 1 <= args.timeout <= 600:
         parser.error("limit must be 1..10 and timeout 1..600 seconds")
     if args.summarize:
@@ -441,6 +516,15 @@ def main():
             return 0
         except Exception as error:
             print(f"Offline summary failed ({type(error).__name__}).", file=sys.stderr)
+            return 1
+    if args.check_result:
+        artifact = args.output / uuid4().hex
+        try:
+            verdict = check_saved_result(args.check_result, args.dataset, artifact, gate=args.gate or 'application')
+            print(f"Offline {verdict['gate']} gate: {verdict['status']}; zero API calls: {artifact / 'gate.json'}")
+            return verdict['exit_code']
+        except Exception as error:
+            print(f'Offline gate rejected ({type(error).__name__}); no passing verdict.', file=sys.stderr)
             return 1
     load_dotenv()
     if not os.getenv("DEEPSEEK_API_KEY", "").strip():
@@ -455,7 +539,10 @@ def main():
                                                    and bool(result.get('quality_input_sha256'))))
         print(f"Task evaluation: {artifact / 'summary.md'}")
         print(f"Status: {result['status']}; Task Success Rate: {result.get('task_success_rate')}")
-        return 0 if result["status"] == "complete" and result["task_success_rate"] == 1 else 3
+        verdict = result_gate(result, gate=args.gate or 'model')
+        atomic_text(artifact/'cli-gate.json', json.dumps(verdict, ensure_ascii=False, indent=2))
+        print(f"CLI {verdict['gate']} gate: {verdict['status']}")
+        return verdict['exit_code']
     except Exception as error:
         print(f"Task evaluation failed ({type(error).__name__}); artifacts: {artifact}", file=sys.stderr)
         return 1

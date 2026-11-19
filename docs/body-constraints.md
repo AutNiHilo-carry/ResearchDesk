@@ -26,6 +26,30 @@
 
 原 `success` / Task Success Rate 保留原模型辅助口径，不能当成新应用检查通过率。新增应用状态存放在 `application_assessment`；消费方要检查这个字段，不能只读原 success。最终人工验收仍 pending。这里接入的是任务评测入口，尚未改变普通 Agent/工作流的修订选择或生产执行门槛。
 
+## 显式应用验收与退出码
+
+新任务评测可显式选择自动化退出条件：
+
+```powershell
+.\.venv\Scripts\python.exe -m researchdesk.task_eval --dataset evals/technical-selection-v1.json --limit 1 --gate application
+```
+
+此命令仍会生成报告并调用配置的模型，沿用已有费用与预算行为；`--gate` 不会增加调用，也不自动修订。所有任务的模型与确定性检查都通过才返回0，失败或未知返回3。`cli-gate.json` 单独记录所选合同、逐任务状态和退出码；原 result.json 的模型分数不改。默认或 `--gate model` 保留原模型口径；任务评测入口不会默认把候选应用合同推广到所有调用方。
+
+已有完整评测可以零 API 检查：
+
+```powershell
+.\.venv\Scripts\python.exe -m researchdesk.task_eval --check-result ./evaluation/result.json --dataset ./evals/technical-selection-v1.json --output runs/evaluation-gates
+```
+
+`--check-result` 默认选择 application，可显式选择 `--gate model`。它先复用有绑定的质量校验，核对任务集、冻结资料、正文、证据与已保存引用标签，再校验业务 criterion ID、布尔标签、报告原文引用和派生通过字段。最后重新计算各任务门槛，不信任缓存 application_assessment 或批次总通过率。它不重新判断标签语义，也不认证本地文件的作者身份。
+
+本入口检查完整保存批次，不接受 `--limit` 或 `--timeout` 等生成控制；不能通过运行参数悄悄只验收其中一题。
+
+结果另存到新的独立目录：gate.json、summary.md 和包含输入哈希的 provenance.json。来源文件和历史成绩不写回；不加载凭证、不调用模型。通过返回0，失败或未知返回3；无效/不完整批次、缓存不一致等校验错误返回1，并且不生成通过结论。空任务批次、重复任务、缺失评分不能变成通过。旧批次没有长度记录时，应用结论为 unknown，须保留这段历史空缺，不能临时补算后声称原批次已经执行了新规则。
+
+`--summarize` 仍只表示成功生成阅读材料，返回0不表示验收通过；不能与 `--gate` 同用。报告策略 / Context 对照命令的退出码仍表示实验是否完成，自动化若要检查各组应用验收，应对每组 result.json 单独运行 `--check-result`。人工验收仍为 pending。
+
 冻结的 `report_eval` 新计划额外保存 constraint_policy，并由全部应用源码哈希绑定实现。旧待执行计划不会在新代码下悄悄继续；应重新准备，保留原计划。旧已完成结果不新增分数或修改通过率，离线摘要显示 not_checked，应用状态不会由缺失长度记录自动变为通过。
 
 `--with-quality --dataset ...` 的有绑定摘要还会对冻结正文重新执行确定性计数，拒绝被替换、删除或与策略不符的新批次长度缓存。普通只读摘要只展示并检查记录结构，不访问正文，不构成缓存真实性认证。历史文件和人工标签不迁移。
@@ -37,3 +61,5 @@
 真实失败正文只需离线重检，不重新调用模型。它证明计数机制能暴露已知违规，不证明生成质量改善，也不解决联合推断、过强建议或 rubric 覆盖不足。当前没有自然语言自动抽取任意约束、自动压缩或新 Agent。
 
 2026-11-18 已用新 CLI 重检上述真实新稿，得到 failed、563/200、body_too_long；返回码3，原正文逐字节哈希未变，零 API。独立结果保存在本地 `runs/constraint-probes/b702e79ca87347c6bcd13598be42b3e3/`，没有回写旧评测或把它伪装成当时已执行的检查。
+
+2026-11-19 对历史后序三题 v2 运行零 API 结果验收：application 为 unknown、退出3，显式 model 为 passed、退出0；原 result.json 哈希未变。独立记录位于 `runs/evaluation-gate-probes/application/46affc0ccfd54f489088fe5df2f2dad5/` 和 `runs/evaluation-gate-probes/model/ef2bf5aedc06467fa14465e1e09b3d70/`。这是对历史已有模型标签的校验，没有补造长度记录或新增模型判定。
