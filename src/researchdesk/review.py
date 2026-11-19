@@ -173,10 +173,16 @@ def import_review(evaluation, dataset, bundle, review_path, output):
                    + [row.reason for row in task.criteria])
         if any(not reason.strip() for reason in reasons):
             raise VerificationError("Human review reasons must not be blank.")
-    result = json.loads((evaluation / "result.json").read_text(encoding="utf-8"))
+    # Bind the exact model data used below to the packet just validated.
+    raw_result = (evaluation / "result.json").read_text(encoding="utf-8")
+    if digest(raw_result) != packet["result_sha256"]:
+        raise VerificationError("Model evaluation result changed during review import.")
     model_quality_path = evaluation / "citation-quality.json"
-    model_rows = {row["unit_id"]: row for row in json.loads(model_quality_path.read_text(
-        encoding="utf-8"))["units"]} if model_quality_path.exists() else {}
+    raw_quality = model_quality_path.read_text(encoding="utf-8") if model_quality_path.exists() else None
+    if (digest(raw_quality) if raw_quality is not None else None) != packet["model_quality_sha256"]:
+        raise VerificationError("Model quality assessment changed during review import.")
+    result = json.loads(raw_result)
+    model_rows = {row["unit_id"]: row for row in json.loads(raw_quality)["units"]} if raw_quality is not None else {}
     machine_tasks = {row["task_id"]: row for row in result["tasks"]}
     reviewed, differences = [], []
     for task in review.tasks:

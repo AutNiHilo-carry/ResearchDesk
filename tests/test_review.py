@@ -302,3 +302,67 @@ def test_quality_view_rejects_changed_or_unbound_details(gap_evaluation, tmp_pat
     with pytest.raises((VerificationError, FileNotFoundError)):
         render_summary(result_path, tmp_path / 'view', with_quality=True, dataset=dataset)
     assert not (tmp_path / 'view').exists()
+
+@pytest.mark.parametrize("mutation", ["result", "quality", "missing_quality"])
+def test_import_rejects_model_files_changed_after_packet_validation(review_case, tmp_path, monkeypatch, mutation):
+    evaluation, _, bundle = review_case
+    review = filled_review(bundle)
+    review_path = bundle / "filled-test-only.json"
+    result_path = evaluation / "result.json"
+    quality_path = evaluation / "citation-quality.json"
+    original_read = Path.read_text
+    model_result = json.loads(original_read(result_path, encoding="utf-8"))
+    model_quality = json.loads(original_read(quality_path, encoding="utf-8"))
+
+    def read_and_change_model(path, *args, **kwargs):
+        text = original_read(path, *args, **kwargs)
+        if path == review_path:
+            if mutation == "result":
+                model_result["task_success_rate"] = 0
+                result_path.write_text(json.dumps(model_result), encoding="utf-8")
+            elif mutation == "quality":
+                model_quality["units"][0]["links"][0]["verdict"] = "partial"
+                quality_path.write_text(json.dumps(model_quality), encoding="utf-8")
+            else:
+                quality_path.unlink()
+        return text
+
+    monkeypatch.setattr(Path, "read_text", read_and_change_model)
+    output = tmp_path / "rejected"
+    with pytest.raises(VerificationError, match="changed"):
+        submit(review_case, review, output)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("add_quality_later", [False, True])
+def test_import_missing_model_quality_is_bound_as_missing(review_case, tmp_path, monkeypatch, add_quality_later):
+    evaluation, dataset, _ = review_case
+    quality_path = evaluation / "citation-quality.json"
+    original_quality = quality_path.read_text(encoding="utf-8")
+    quality_path.unlink()
+    result_path = evaluation / "result.json"
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    result.update(status="scoring_failed", task_success_rate=None)
+    result_path.write_text(json.dumps(result), encoding="utf-8")
+    bundle = tmp_path / "missing-model-quality-bundle"
+    export_review(evaluation, dataset, bundle)
+    original_read = Path.read_text
+
+    def read_and_add_quality(path, *args, **kwargs):
+        text = original_read(path, *args, **kwargs)
+        if add_quality_later and path == bundle / "filled-test-only.json":
+            quality_path.write_text(original_quality, encoding="utf-8")
+        return text
+
+    monkeypatch.setattr(Path, "read_text", read_and_add_quality)
+    output = tmp_path / "outcome"
+    if add_quality_later:
+        with pytest.raises(VerificationError, match="changed"):
+            submit((evaluation, dataset, bundle), filled_review(bundle), output)
+        assert not output.exists()
+    else:
+        outcome = submit((evaluation, dataset, bundle), filled_review(bundle), output)
+        assert outcome["human_task_success_rate"] == 1
+        assert outcome["model_task_success_rate"] is None
+        assert outcome["disagreements"] == []
+        assert not quality_path.exists()
