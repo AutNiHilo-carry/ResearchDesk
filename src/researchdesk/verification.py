@@ -3,6 +3,8 @@ import hashlib
 import json
 import re
 import sqlite3
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -113,16 +115,42 @@ def split_units(report):
     return units
 
 
-def load_run(directory):
-    metadata = json.loads((directory / "run.json").read_text(encoding="utf-8"))
-    if metadata.get("status") != "completed":
-        raise VerificationError("Verify only a completed run.")
-    draft = directory / "draft.md"
-    report_path = draft if draft.is_file() else directory / "report.md"
-    report = report_path.read_text(encoding="utf-8").split("\n## Evidence Ledger\n", 1)[0]
-    database = directory / "application.sqlite3"
-    if database.exists():
-        connection = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)
+def _database_records(database):
+    """Read a private database/WAL copy; never let SQLite open the source path."""
+    directory = database.parent.resolve()
+    paths = {suffix: database.with_name(database.name + suffix) for suffix in ('', '-wal', '-journal')}
+
+    def signature(path):
+        if not path.exists():
+            if path.is_symlink():
+                raise VerificationError("Database input is a broken link.")
+            return None
+        if not path.is_file() or not path.resolve().is_relative_to(directory):
+            raise VerificationError("Database input escapes its run or is not a regular file.")
+        found = hashlib.sha256()
+        with path.open('rb') as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b''):
+                found.update(block)
+        return found.hexdigest()
+
+    before = {suffix: signature(path) for suffix, path in paths.items()}
+    if before[''] is None:
+        raise VerificationError("Application database changed or is missing.")
+    with tempfile.TemporaryDirectory(prefix='researchdesk-readonly-ledger-') as temporary:
+        snapshot = Path(temporary) / database.name
+        for suffix, expected in before.items():
+            if expected is None:
+                continue
+            target = snapshot.with_name(snapshot.name + suffix)
+            shutil.copyfile(paths[suffix], target)
+            with target.open('rb') as handle:
+                copied = hashlib.file_digest(handle, 'sha256').hexdigest()
+            if copied != expected:
+                raise VerificationError("Application database changed while copying.")
+        if before != {suffix: signature(path) for suffix, path in paths.items()}:
+            raise VerificationError("Application database changed while copying.")
+        # immutable=1 would ignore committed WAL frames. SHM is recreated only here.
+        connection = sqlite3.connect(snapshot.resolve().as_uri() + "?mode=ro", uri=True)
         try:
             if connection.execute("PRAGMA user_version").fetchone()[0] != 1:
                 raise VerificationError("Unsupported application database version.")
@@ -132,6 +160,21 @@ def load_run(directory):
                 "SELECT payload FROM records WHERE kind='evidence'")]
         finally:
             connection.close()
+        if before != {suffix: signature(path) for suffix, path in paths.items()}:
+            raise VerificationError("Application database changed during reading.")
+    return sources, evidence
+
+
+def load_run(directory):
+    metadata = json.loads((directory / "run.json").read_text(encoding="utf-8"))
+    if metadata.get("status") != "completed":
+        raise VerificationError("Verify only a completed run.")
+    draft = directory / "draft.md"
+    report_path = draft if draft.is_file() else directory / "report.md"
+    report = report_path.read_text(encoding="utf-8").split("\n## Evidence Ledger\n", 1)[0]
+    database = directory / "application.sqlite3"
+    if database.exists():
+        sources, evidence = _database_records(database)
     else:
         def read(name):
             path = directory / name
