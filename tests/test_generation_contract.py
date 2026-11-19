@@ -170,3 +170,29 @@ def test_saved_report_modes_cannot_override_generation_contract(monkeypatch,mode
     with pytest.raises(SystemExit) as error:
         report_eval.main()
     assert error.value.code==2
+
+
+def test_audit_exposes_versioned_complete_control_fingerprint(review_case, tmp_path):
+    from researchdesk.evaluation_audit import compare_evaluations
+    from researchdesk.review import fingerprint
+    baseline, candidate = comparison_fixture(review_case, tmp_path)
+    original = json.loads((baseline / 'result.json').read_text(encoding='utf-8'))
+    audit = compare_evaluations(baseline, candidate)
+    assert audit['controls_version'] == 'evaluation-controls-v2'
+    assert audit['controls']['generation_contracts'] == original['generation_contracts']
+    assert audit['controls_sha256'] == fingerprint(dict(version=audit['controls_version'], controls=audit['controls']))
+    assert 'task_success_rate' not in audit['controls']
+
+
+def test_recorded_generation_metadata_changes_control_fingerprint(review_case, tmp_path):
+    from researchdesk.evaluation_audit import compare_evaluations
+    baseline, candidate = comparison_fixture(review_case, tmp_path)
+    recorded = compare_evaluations(baseline, candidate)
+    for directory in (baseline, candidate):
+        path = directory / 'result.json'
+        result = json.loads(path.read_text(encoding='utf-8'))
+        result.pop('generation_contracts')
+        path.write_text(json.dumps(result), encoding='utf-8')
+    legacy = compare_evaluations(baseline, candidate)
+    assert recorded['controls_sha256'] != legacy['controls_sha256']
+    assert legacy['controls']['generation_contracts'] is None

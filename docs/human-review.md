@@ -64,3 +64,18 @@ reviewer身份为自行声明，程序无法证明是谁填写。测试桩只能
 缺失／未完成的引用评分分别标记 missing／incomplete，citation_label_comparison_status 为 unavailable；空分歧列表不表示标签一致。旧资料没有保存输入绑定时，citation_input_identical 为 null，不能称为相同输入；若同时提供完整标签却没有绑定，则拒绝比较。正常的同文标签差异仍保留，模型成绩和默认策略不改写。
 
 该检查绑定本次实际读取的材料，不是多文件原子快照或作者认证；还不能证明供应商后端模型版本相同。正文不变但其他任务或证据上下文不同，也不能直接归因于随机评分波动。回归使用脚本资料和标签，覆盖正文变化、证据变化、错文字、重复标签、缺少绑定和缺失评分，不替代独立人工意见。
+
+## 控制条件指纹版本
+
+新审计使用 controls_version=`evaluation-controls-v2`，同时保存 controls 本体。它包含数据集、任务顺序、门槛、语料哈希、模型声明、模型设置、任务后缀／两种评分 Prompt 哈希，以及此前漏入指纹的 generation_contracts。哈希覆盖版本和完整条件：
+
+```python
+from researchdesk.review import fingerprint
+assert audit['controls_sha256'] == fingerprint({
+    'version': audit['controls_version'], 'controls': audit['controls'],
+})
+```
+
+fingerprint 使用保留 Unicode、按键排序的 JSON 文本计算 SHA256。缺少历史生成合同记录时，controls.generation_contracts 为 null，不推断成 legacy 默认值；有记录与缺少记录因此能在指纹中区分。左右合同不一致仍会拒绝，既有其他控制条件比较保持不变。
+
+旧审计没有 controls_version，其 controls_sha256 未覆盖生成合同，不与 v2 哈希直接比较；摘要显示 legacy_unversioned。新版本不会修改旧审计、报告或分数，需要时从原材料重新离线审计并另存输出。这个指纹证明记录内容的绑定，不证明声明符合实际执行、模型后端快照相同或某个策略有效；它也不包含全部修订参数，不能用同一指纹宣称整个实验配置完全相同。

@@ -9,6 +9,9 @@ from .storage import atomic_text
 from .verification import VerificationError, digest, load_run, prepare, split_units
 
 
+CONTROLS_VERSION = "evaluation-controls-v2"
+
+
 def compare_evaluations(baseline_directory, candidate_directory):
     def read(directory):
         raw = (directory / "result.json").read_text(encoding="utf-8")
@@ -110,8 +113,12 @@ def compare_evaluations(baseline_directory, candidate_directory):
             if eid in old_links and old_links[eid] != link["verdict"]:
                 differences.append(dict(unit_id=unit_id, evidence_id=eid, field="verdict",
                                         before=old_links[eid], after=link["verdict"]))
+    control_values = {key: baseline[key] for key in controls}
+    control_values['generation_contracts'] = baseline.get('generation_contracts')
+    control_hash = fingerprint(dict(version=CONTROLS_VERSION, controls=control_values))
     return dict(status="comparison_audited", baseline_result_sha256=baseline_hash,
-        candidate_result_sha256=candidate_hash, controls_sha256=fingerprint({key: baseline[key] for key in controls}),
+        candidate_result_sha256=candidate_hash, controls_version=CONTROLS_VERSION,
+        controls=control_values, controls_sha256=control_hash,
         baseline_citation_quality_sha256=old_quality_hash, candidate_citation_quality_sha256=new_quality_hash,
         citation_label_status=dict(baseline=old_status, candidate=new_status),
         citation_label_comparison_status='compared' if old_status == new_status == 'bound_anchors' else 'unavailable',
@@ -132,6 +139,7 @@ def audit_summary(audit):
     if audit.get("status") != "comparison_audited":
         return "# 配对实验审计\n\n审计未完成，不能据此判断修订效果。\n"
     return ("# 配对实验审计\n\n"
+        f"控制条件指纹版本：{audit.get('controls_version', 'legacy_unversioned')}。\n\n"
         f"正文未变化：{audit['unchanged_reports']}；正文变化：{audit['changed_reports']}。\n\n"
         f"引用评分完整输入相同：{audit['citation_input_identical']}。\n\n"
         f"引用标签比较状态：{audit.get('citation_label_comparison_status', 'unknown_legacy')}；不可比较时空分歧列表不代表一致。\n\n"
