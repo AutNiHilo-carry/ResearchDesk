@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
 
 from .storage import atomic_text
-from .task_eval import TASK_SUFFIX
+from .task_eval import task_suffix, generation_contract_spec, common_suffix_hash
 from .task_grading_calibration import compile_cases
 from .task_grading import TaskJudge, grade_tasks, task_prompt
 from .verification import VerificationError, digest, load_run, failure_diagnostics
@@ -41,8 +41,12 @@ def load_pilot(pilot):
     if (plan.get('version') != 1 or result['controls'] != controls
             or digest(json.dumps(frozen_input, ensure_ascii=False, sort_keys=True)) != controls['input_sha256']):
         raise VerificationError('Pilot inputs differ from recorded execution controls.')
-    if digest(TASK_SUFFIX) != controls['task_suffix_sha256']:
+    if common_suffix_hash(plan['tasks']) != controls['task_suffix_sha256']:
         raise VerificationError('Original task suffix changed.')
+    expected = {task['id']: generation_contract_spec(task) for task in plan['tasks']}
+    if ('generation_contracts' in controls and controls['generation_contracts'] != expected
+            or 'generation_contracts' not in controls and any(spec['version'] != 'legacy' for spec in expected.values())):
+        raise VerificationError('Original generation contract binding changed or is missing.')
     for name in ('task_eval.py', 'verification.py'):
         if digest(Path(__file__).with_name(name).read_text(encoding='utf-8')) != controls['source_code_sha256'][name]:
             raise VerificationError('Original request reconstruction code changed.')
@@ -60,9 +64,13 @@ def source_report(pilot, plan, result, arm_name, task):
     directory = Path(record['run_directory']).resolve()
     if not directory.is_relative_to(pilot.resolve() / 'execution' / arm_name / 'tasks'):
         raise VerificationError('Source run escapes the selected pilot arm.')
-    if record['question_sha256'] != digest(task['question'] + TASK_SUFFIX):
+    if record['question_sha256'] != digest(task['question'] + task_suffix(task)):
         raise VerificationError('Source report question changed.')
     report, _, _, metadata = load_run(directory)
+    if task.get('generation_contract', 'legacy') != 'legacy' and (
+            record.get('generation_contract') != generation_contract_spec(task)
+            or metadata.get('question') != task['question'] + task_suffix(task)):
+        raise VerificationError('Source generation contract differs from the frozen question.')
     if record['model'] != plan['model'] or metadata['model'] != plan['model']:
         raise VerificationError('Source report model differs from plan.')
     if metadata.get('report_policy') != plan['controls']['report_policies'][arm_name]:

@@ -19,11 +19,31 @@ from .verification import (ModelJudge, VerificationError, assess, digest, failur
                            load_run, prepare, split_units, markdown as quality_markdown)
 from .task_grading import TaskJudge, grade_tasks
 from .run_metrics import run_metrics
-from .report_constraints import check_body, policy as constraint_policy
+from .report_constraints import check_body, policy as constraint_policy, counting_instruction
 
 TASK_SUFFIX = ("\n仅使用附带的本地资料，不进行外部检索。正文控制在200字以内。"
                "每个事实单独一行并紧跟完整证据引用，纯建议和证据不足声明单独成行。"
                "至少记录并引用一条资料中可确认的事实。")
+
+
+def task_suffix(task):
+    version = task.get('generation_contract', 'legacy')
+    if not isinstance(version, str) or version not in {'legacy', 'body-length-v1'}:
+        raise VerificationError('Unknown task generation contract.')
+    return TASK_SUFFIX if version == 'legacy' else TASK_SUFFIX + '\n' + counting_instruction()
+
+
+def generation_contract_spec(task):
+    suffix = task_suffix(task)
+    spec = dict(version=task.get('generation_contract', 'legacy'), suffix_sha256=digest(suffix))
+    if spec['version'] != 'legacy':
+        spec.update(constraint_policy=constraint_policy(), instruction=counting_instruction())
+    return spec
+
+
+def common_suffix_hash(tasks):
+    hashes = {digest(task_suffix(task)) for task in tasks}
+    return next(iter(hashes)) if len(hashes) == 1 else None
 
 
 class Criterion(BaseModel):
@@ -103,9 +123,9 @@ def run_command(command, directory, log_path, timeout, environment=None):
 
 
 def run_task(task, paths, directory, timeout):
+    question = task["question"] + task_suffix(task)  # Rubric/expected criteria never go to generator.
     directory.mkdir(parents=True, exist_ok=False)
     research = directory / "research"
-    question = task["question"] + TASK_SUFFIX  # Rubric/expected criteria never go to generator.
     command = [sys.executable, "-m", "researchdesk.cli", question, "--local-only",
                "--output", str(research), "--max-tool-calls", "10", "--max-provider-requests", "0",
                "--tool-retries", "0"]
@@ -124,6 +144,8 @@ def run_task(task, paths, directory, timeout):
     run = runs[0] if len(runs) == 1 else None
     status = "timed_out" if outcome["timed_out"] else "generation_failed"
     record = dict(task_id=task["id"], question_sha256=digest(question), **outcome)
+    if task.get('generation_contract', 'legacy') != 'legacy':
+        record['generation_contract'] = generation_contract_spec(task)
     if run is not None:
         record["run_directory"] = str(run)
         record["generation_metrics"] = run_metrics(run)
@@ -200,10 +222,11 @@ def application_assessment(record, batch_status):
 def evaluate_batch(data, tasks, documents, artifact, *, runner=run_task, model_name="deepseek-flash",
                    task_judge=None, evidence_judge=None, timeout=180):
     evaluation_started = time.monotonic()
+    contracts = {task['id']: generation_contract_spec(task) for task in tasks}
     estimated_rubric = []
     for task in tasks:
         texts = [documents[name]["content"] for name in task["documents"]]
-        if len(task["question"] + TASK_SUFFIX + "".join(texts)) > 20000:
+        if len(task["question"] + task_suffix(task) + "".join(texts)) > 20000:
             raise VerificationError("Controlled task input exceeds generation character budget.")
         estimated_rubric.append(dict(question=task["question"], criteria=task["criteria"],
                                       documents=texts, report="x" * 4000))
@@ -223,7 +246,8 @@ def evaluate_batch(data, tasks, documents, artifact, *, runner=run_task, model_n
                   started_at=now(), generator_model=model_name, judge_model=model_name,
                   model_settings=dict(temperature=0, generator_max_tokens=4096, evaluator_max_tokens=8192),
                   thresholds=data["thresholds"], corpus_hashes={name: row["sha256"] for name, row in documents.items()},
-                  task_prompt_suffix_sha256=digest(TASK_SUFFIX), task_timeout_seconds=timeout,
+                  task_prompt_suffix_sha256=common_suffix_hash(tasks), task_timeout_seconds=timeout,
+                  generation_contracts=contracts,
                   constraint_policy=constraint_policy(),
                   tasks=[], promotion="human_review_required", human_review="pending", final_acceptance="pending")
     def save():
@@ -249,7 +273,14 @@ def evaluate_batch(data, tasks, documents, artifact, *, runner=run_task, model_n
         try:
             if record.get("model") != model_name:
                 raise VerificationError("Generator model differs from the frozen evaluation configuration.")
-            report, evidence, sources, _ = load_run(Path(record["run_directory"]))
+            report, evidence, sources, manifest = load_run(Path(record["run_directory"]))
+            task = task_map[record['task_id']]
+            if task.get('generation_contract', 'legacy') != 'legacy':
+                expected_question = task['question'] + task_suffix(task)
+                if (record.get('generation_contract') != contracts[task['id']]
+                        or record.get('question_sha256') != digest(expected_question)
+                        or manifest.get('question') != expected_question):
+                    raise VerificationError('Generation contract did not reach the recorded research question.')
             record['constraints'] = check_body(report)
             units = split_units(report)
         except Exception as error:
@@ -331,6 +362,9 @@ def summary(result, *, quality_details=False):
     lines = ["# End-to-End Research Task Evaluation", "", "受控资料，模型辅助评分；需人工复核。",
              f"Scope: {result.get('scope') or 'unspecified'}",
              f"Label status: {result.get('label_status') or 'unspecified'}", "",
+             'Generation contracts: ' + (json.dumps({key: spec.get('version') for key, spec in result['generation_contracts'].items()},
+                                                    ensure_ascii=False, sort_keys=True)
+                                        if isinstance(result.get('generation_contracts'), dict) else 'not_recorded'), '',
              f"Status: {result['status']}", f"Task Success Rate: {result.get('task_success_rate')}",
              f"Generation Completion Rate: {result.get('generation_completion_rate')}", "",
              "Human review: pending; Final acceptance: pending（本入口不执行人工验收）。",
@@ -497,11 +531,14 @@ def main():
     offline.add_argument('--check-result', type=Path, help='Validate saved inputs and issue a separate offline gate verdict')
     parser.add_argument('--gate', choices=['model', 'application'], help='Automation exit gate; check-result defaults to application, new evaluation to model')
     parser.add_argument('--with-quality', action='store_true', help='Include bound saved citation details with --summarize')
+    parser.add_argument('--generation-contract', choices=['legacy', 'body-length-v1'], help='Explicit generator counting instructions; default legacy')
     args = parser.parse_args()
     if args.with_quality and not args.summarize:
         parser.error('--with-quality requires --summarize.')
     if args.summarize and args.gate is not None:
         parser.error('--summarize is formatting only; use --check-result for gate exit codes.')
+    if (args.summarize or args.check_result) and args.generation_contract is not None:
+        parser.error('Offline views and gates cannot replace the recorded generation contract.')
     if args.check_result and (args.limit is not None or args.timeout is not None):
         parser.error('--check-result validates the whole saved batch; generation controls are not accepted.')
     args.limit = args.limit if args.limit is not None else 3
@@ -533,6 +570,8 @@ def main():
     artifact = args.output / uuid4().hex
     try:
         data, tasks, documents = load_taskset(args.dataset.resolve())
+        if args.generation_contract == 'body-length-v1':
+            tasks = [dict(task, generation_contract=args.generation_contract) for task in tasks]
         result = evaluate_batch(data, tasks[:args.limit], documents, artifact,
                                 model_name=os.getenv("DEEPSEEK_MODEL", "deepseek-flash"), timeout=args.timeout)
         atomic_text(artifact / "summary.md", summary(result, quality_details=result['status'] == 'complete'

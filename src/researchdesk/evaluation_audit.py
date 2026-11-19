@@ -19,6 +19,8 @@ def compare_evaluations(baseline_directory, candidate_directory):
                 "task_grader_prompt_sha256", "citation_judge_prompt_sha256")
     if any(baseline.get(key) is None or baseline[key] != candidate.get(key) for key in controls):
         raise VerificationError("Evaluation controls differ; refusing a controlled comparison label.")
+    if baseline.get('generation_contracts') != candidate.get('generation_contracts'):
+        raise VerificationError('Generation contracts differ; refusing a controlled comparison label.')
     def records(result):
         found = {row["task_id"]: row for row in result["tasks"]}
         if len(found) != len(result["tasks"]) or set(found) != set(result["selected_tasks"]):

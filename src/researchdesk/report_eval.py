@@ -11,6 +11,7 @@ from .model_budget import VERSION
 from .report_policy import policy_spec
 from .storage import RecoveryError, atomic_text
 from .task_eval import TASK_SUFFIX, evaluate_batch, load_taskset, run_task, summary, result_gate
+from .task_eval import task_suffix, generation_contract_spec, common_suffix_hash
 from .task_grading import TASK_PROMPT
 from .verification import SYSTEM_PROMPT_V2, digest, VerificationError
 from .report_constraints import policy as constraint_policy
@@ -34,7 +35,7 @@ def controls(plan):
     rubric = []
     for task in tasks:
         text = "".join(documents[name]["content"] for name in task["documents"])
-        if len(task["question"] + TASK_SUFFIX + text) > 20000:
+        if len(task["question"] + task_suffix(task) + text) > 20000:
             raise RecoveryError("Experiment input exceeds the generation budget.")
         rubric.append(dict(question=task["question"], criteria=task["criteria"], documents=text, report="x"*4000))
     if len(json.dumps(rubric, ensure_ascii=False)) > 60000:
@@ -45,7 +46,8 @@ def controls(plan):
     payload = {key: plan[key] for key in ("data", "tasks", "documents", "model", "max_model_calls", "timeout")}
     return dict(input_sha256=digest(json.dumps(payload, ensure_ascii=False, sort_keys=True)),
         source_code_sha256=code_hashes(), report_policies={v: policy_spec(v) for v in ("v1", "v2")},
-        task_suffix_sha256=digest(TASK_SUFFIX), task_judge_sha256=digest(TASK_PROMPT),
+        task_suffix_sha256=common_suffix_hash(tasks), task_judge_sha256=digest(TASK_PROMPT),
+        generation_contracts={task['id']: generation_contract_spec(task) for task in tasks},
         evidence_judge_sha256=digest(SYSTEM_PROMPT_V2), context_mode="full",
         constraint_policy=constraint_policy(),
         tool_policy=dict(max_calls=10, max_provider_requests=0, max_retries=0),
@@ -53,7 +55,8 @@ def controls(plan):
         request_limit_scope="generation per task plus at most two batch graders per arm; no SDK retries; not a token or monetary cap")
 
 
-def create_plan(dataset, directory, *, model, limit=None, maximum=6, timeout=180, task_ids=None):
+def create_plan(dataset, directory, *, model, limit=None, maximum=6, timeout=180, task_ids=None, generation_contract='legacy'):
+    generation_contract_spec(dict(generation_contract=generation_contract))
     if limit is not None and (type(limit) is not int or not 1 <= limit <= 3):
         raise RecoveryError("Report pilot supports 1..3 tasks.")
     if task_ids is not None:
@@ -71,6 +74,8 @@ def create_plan(dataset, directory, *, model, limit=None, maximum=6, timeout=180
         tasks = [available[key] for key in task_ids]
     else:
         tasks = tasks[:limit if limit is not None else 3]
+    if generation_contract != 'legacy':
+        tasks = [dict(task, generation_contract=generation_contract) for task in tasks]
     names = {name for task in tasks for name in task["documents"]}
     plan = dict(version=1, created_at=now(), data=data, tasks=tasks,
         documents={name: doc for name, doc in documents.items() if name in names},
@@ -81,6 +86,7 @@ def create_plan(dataset, directory, *, model, limit=None, maximum=6, timeout=180
     lines = ["# 报告策略实验计划", "", "仅准备，未调用 API；人工审核待进行。",
         f"模型：{model}；两组 v1→v2；每任务每组生成上限：{maximum} 次。",
         f"含批量评分最多 {plan['controls']['max_sdk_requests']} 次 SDK 请求，不是费用上限。",
+        f"两组生成合同：{generation_contract}；实际后缀哈希与计数规则见 plan.json controls。",
         "接收方为配置的 DeepSeek API；任务生成发送问题与资料，评分另含 rubric 和报告。", ""]
     for task in tasks:
         lines += [f"- {task['id']}：{task['question']}", f"  资料：{', '.join(task['documents'])}"]
@@ -241,10 +247,11 @@ def main():
     parser.add_argument("--max-model-calls", type=int)
     parser.add_argument("--timeout", type=float)
     parser.add_argument("--output", type=Path)
+    parser.add_argument('--generation-contract', choices=['legacy','body-length-v1'])
     args = parser.parse_args()
-    if args.summarize_result and any(getattr(args,key) is not None for key in ('dataset','model','limit','task_ids','max_model_calls','timeout')):
+    if args.summarize_result and any(getattr(args,key) is not None for key in ('dataset','model','limit','task_ids','max_model_calls','timeout','generation_contract')):
         parser.error('Offline rendering accepts only a saved result and an output directory.')
-    if args.execute_plan and any(getattr(args, key) is not None for key in ("dataset", "model", "limit", "task_ids", "max_model_calls", "timeout", "output")):
+    if args.execute_plan and any(getattr(args, key) is not None for key in ("dataset", "model", "limit", "task_ids", "max_model_calls", "timeout", "output", 'generation_contract')):
         parser.error("Execution accepts only the frozen plan directory, no replacements.")
     if args.task_ids is not None and args.limit is not None:
         parser.error('--task-id and --limit are mutually exclusive.')
@@ -266,7 +273,8 @@ def main():
         plan = create_plan(args.dataset or Path("evals/research-tasks-v1.json"), directory,
             model=args.model or "deepseek-flash", limit=args.limit, task_ids=args.task_ids,
             maximum=args.max_model_calls if args.max_model_calls is not None else 6,
-            timeout=args.timeout if args.timeout is not None else 180)
+            timeout=args.timeout if args.timeout is not None else 180,
+            generation_contract=args.generation_contract or 'legacy')
         print(f"Prepared only; no API calls. Plan: {directory / 'plan.json'}")
         print(f"Maximum SDK requests if executed: {plan['controls']['max_sdk_requests']}")
         return 0

@@ -18,6 +18,13 @@ def policy(max_chars=200):
                 included='all_other_text_including_markdown_punctuation_and_fenced_content')
 
 
+def counting_instruction():
+    return (f"正文长度合同 body-length-v1：上限{policy()['max_chars']}个 Unicode 码点。"
+            "只忽略 Unicode 空白和规范 Evidence 引用（E 后16位小写十六进制，使用成对方括号或全角方括号）。"
+            "所有其他字符都计数，包括标点、英文、Markdown、代码围栏及其内容和零宽字符；组合字符可能占多个码点。"
+            "正文不能为空。保留任务要求和证据引用，不以删掉业务要求、重复事实或隐藏正文换取长度合规。")
+
+
 def check_body(report, *, max_chars=200):
     spec = policy(max_chars)
     if not isinstance(report, str):

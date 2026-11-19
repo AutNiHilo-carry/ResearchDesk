@@ -63,3 +63,23 @@
 2026-11-18 已用新 CLI 重检上述真实新稿，得到 failed、563/200、body_too_long；返回码3，原正文逐字节哈希未变，零 API。独立结果保存在本地 `runs/constraint-probes/b702e79ca87347c6bcd13598be42b3e3/`，没有回写旧评测或把它伪装成当时已执行的检查。
 
 2026-11-19 对历史后序三题 v2 运行零 API 结果验收：application 为 unknown、退出3，显式 model 为 passed、退出0；原 result.json 哈希未变。独立记录位于 `runs/evaluation-gate-probes/application/46affc0ccfd54f489088fe5df2f2dad5/` 和 `runs/evaluation-gate-probes/model/ef2bf5aedc06467fa14465e1e09b3d70/`。这是对历史已有模型标签的校验，没有补造长度记录或新增模型判定。
+
+## 显式向生成端说明计数规则
+
+默认 `legacy` 保留旧 TASK_SUFFIX 的原始字节及其问题哈希规则。候选 `body-length-v1` 在旧后缀之后追加精确计数说明，来自同一计数模块；没有改变验证器、评分提示词、门槛或模型预算，也没有证明能提高遵循率。
+
+```powershell
+.\.venv\Scripts\python.exe -m researchdesk.report_eval --dataset evals/technical-selection-v1.json --task-id version_scope --task-id wal_default_claim --generation-contract body-length-v1 --max-model-calls 4
+```
+
+这是零 API 准备命令。所选任务、资料和 rubric 保持原值，两组写作策略都使用同一生成计数合同；此计划比较写作策略，不是 legacy 与计数提示的效果对照。显式生成合同不是新的 Agent runtime 或自动压缩器。
+
+`task_eval` 新付费评测也支持同一 `--generation-contract body-length-v1`，可同时指定 `--gate application`。计划执行、已有结果验收或离线摘要不接受用此参数替换保存的版本。Context、fault 和 paired 入口尚未提供此候选选项，仍用 legacy；不会通过共享常量静默改变它们。
+
+冻结计划和新批次保存逐任务 generation_contracts，包含版本、实际后缀哈希、精确提示文本和约束规则。单一版本批次的 task_prompt_suffix_sha256 是实际后缀哈希；混合版本的直接 API 批次不伪造单一哈希，使用逐任务记录。新增提示也计入生成输入预检上限。
+
+实际 run_task 命令附带该问题后缀，记录完整问题哈希。候选运行须同时具有一致的运行记录和 run.json.question，否则在请求评分前记 invalid_artifacts。rubric 仍不进入生成问题。回放按保存的任务版本核对实际问题，拒绝丢失或改变候选绑定；旧 legacy 问题和已完成历史不自动升级。已有待执行计划因源码变化须重新准备，不绕过原源码哈希检查。
+
+同一控制变量的评测审计会拒绝不同 generation_contracts，不能把改变提示词的结果标成其他变量完全固定。生成计数提示与长度拦截分别记录；提示有可能仍被模型忽略，不能因此放宽应用验收或自动追加重试。
+
+2026-11-19 已按上述两题准备 `runs/generation-contract-plans/5746f5fdbf8547d3abe02f453d26ffd4/`，两组均为候选合同，每任务每组生成上限4次，含评分最多20次 SDK 请求。仅准备，未执行；没有将旧外部副作用题的失败改成成功，也没有新增真实模型调用。
