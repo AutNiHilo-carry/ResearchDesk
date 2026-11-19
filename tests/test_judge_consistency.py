@@ -62,3 +62,26 @@ def test_invalid_assessments_rejected_even_with_rebound_file_hash(data, issue):
     paths[2].write_text(json.dumps(cases))
     with pytest.raises(ValueError):
         compare(*paths)
+
+
+@pytest.mark.parametrize("change", ["replace", "remove"])
+def test_cases_hash_binds_parsed_snapshot_when_file_changes(data, monkeypatch, change):
+    paths, _ = data
+    original_hash = fingerprint(paths[2])
+    original_read = type(paths[0]).read_bytes
+
+    def read_and_change_cases(path):
+        raw = original_read(path)
+        if path == paths[0]:
+            if change == "replace":
+                paths[2].write_text("{}")
+            else:
+                paths[2].unlink()
+        return raw
+
+    monkeypatch.setattr(type(paths[0]), "read_bytes", read_and_change_cases)
+    result = compare(*paths)
+    assert result["cases_sha256"] == original_hash
+    assert result["compared_pairs"] == 1
+    assert result["pairs"][0]["id"] == "P1"
+    assert result["factual_disagreements"] == 1
