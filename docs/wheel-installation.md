@@ -13,8 +13,12 @@
 - console script 与隔离模式模块入口的 `--help` 可用。
 - 固定资料的七项机制演示通过，模型/外部请求数为0。
 - 历史评分摘要能离线显示 invalid/unknown 和最终验收 pending，原 JSON 字节不变。
+- 安装后的真实验收 CLI 子进程矩阵：短稿应用通过返回0、模型通过但超长返回3、同一超长稿显式模型口径返回0、旧批次缺检查返回3/unknown、被改动的长度缓存返回1且无验收结论。
+- 安装后的独立正文检查 CLI 能拒绝213/200的固定超长正文；逐文件核对所有评测输入未变。
 
 机制和摘要模块以 Python `-I` 启动，忽略 PYTHONPATH/当前目录；Python audit hook 拒绝这些子进程中的 socket connect/DNS 事件。console help 在清理 PYTHONPATH/PYTHONHOME 的环境中运行。此检查不覆盖所有系统网络机制，不是操作系统沙箱；wheel 构建和依赖安装仍需联网下载。
+
+验收矩阵同样使用 `-I`，每次启动独立进程，task_eval 子进程还将 dotenv 加载函数替换为明确拒绝。样例由注入的 runner、rubric 和证据标签创建，故意让模型口径全通过以暴露长度拦截；不会把 fixture 的 passed 当作模型或人工质量结论。原始批次保留，应用状态不信任缓存徽标。矩阵及退出码回执写入 smoke result.json，使用已有 CI artifact 白名单归档。
 
 ## 本地复现（PowerShell）
 
