@@ -31,3 +31,23 @@ execution/result.json 与 summary.md 汇总两组结果，各组保留完整原�
 ## 选择指定任务
 
 可重复传入 --task-id 选择1至3题，保留给定顺序；不能与 --limit 或 --execute-plan 混用。准备仍为零 API，执行预算随所选题数冻结。见 [按任务 ID 准备对照](report-task-selection.md)。
+
+## 模型口径与应用状态并列
+
+汇总保留原模型通过率和成本差值，新增每组应用状态及通过/失败/未知的任务数量。逐题配对列展示两组各自的长度与应用状态；不会因为模型通过率是1就省略超长或未检查。应用状态复用已有 gate 派生规则，不信任缓存 application_assessment 或旧 pairs 徽标。
+
+每组状态只从保存的分项记录重算，没有重新读取研究正文、证据或任务集，因此属于记录视图，不是有绑定的验收。invalid_record 表示记录缺失或不一致，数量显示 N/A，不用0/0/0冒充已检查。历史任务缺少长度记录时保持 not_checked / unknown。配对保留两组任务 ID 的并集，缺少对方时成功标签和指标差值保留 None、应用状态为 unknown；重复任务 ID 拒绝处理，避免静默覆盖。
+
+新实验 result.json 的 pairs 增加状态字段；原模型 success、质量与成本字段保留原口径。仅有 complete 表示流程完成，不表示任一策略可自动晋升。人工审核继续 pending。
+
+## 零 API 重绘历史对照
+
+```powershell
+.\.venv\Scripts\python.exe -m researchdesk.report_eval --summarize-result runs/report-evaluations/<ID>/execution/result.json --output runs/report-comparison-views
+```
+
+本入口不加载凭证、不调用模型或准备新付费计划，只读取给定对照 JSON，另存 summary.md 和带源文件哈希的 provenance.json；不会改写历史结果或原 pairs。输出目录须新建，不覆盖旧视图。不接受模型、任务选择、预算、超时或执行目录等替换参数。中断留下的视图若缺 provenance.json，应视为未完成。
+
+返回0只表示格式化成功；未知、失败和已中断实验仍可保留阅读材料，不能把此退出码当作验收通过。真实自动化验收请对每组的 result.json 使用[绑定结果检查](body-constraints.md)中的 `task_eval --check-result`。旧待执行计划因源码绑定变化须重新准备，已完成历史保持原样。
+
+2026-11-19 已离线重绘后序三题真实对照，保留 v1 原模型通过率2/3、v2为3/3。应用记录视图分别为 failed（通过/失败/未知=0/1/2）和 unknown（0/0/3）；外部副作用题在两组都显示长度 not_checked。没有因原 v2 模型全通过就补造应用验收通过。新视图位于本地 `runs/report-comparison-views/c61540ca64a24349a019658a2863dee0/`，原结果逐字节未变，本轮零 API。

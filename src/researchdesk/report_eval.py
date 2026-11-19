@@ -10,9 +10,9 @@ from .ledger import now
 from .model_budget import VERSION
 from .report_policy import policy_spec
 from .storage import RecoveryError, atomic_text
-from .task_eval import TASK_SUFFIX, evaluate_batch, load_taskset, run_task, summary
+from .task_eval import TASK_SUFFIX, evaluate_batch, load_taskset, run_task, summary, result_gate
 from .task_grading import TASK_PROMPT
-from .verification import SYSTEM_PROMPT_V2, digest
+from .verification import SYSTEM_PROMPT_V2, digest, VerificationError
 from .report_constraints import policy as constraint_policy
 
 
@@ -107,37 +107,89 @@ def policy_runner(version, maximum):
     return run
 
 
+def application_view(arm):
+    """Record-only presentation; a passing view is not bound offline acceptance."""
+    try:
+        verdict = result_gate(arm, gate='application')
+    except (VerificationError, KeyError, TypeError, ValueError, AttributeError) as error:
+        return dict(status='unknown', counts=None, tasks={}, validation='invalid_record', error_type=type(error).__name__)
+    counts = {value: sum(row['application_gate'] == value for row in verdict['tasks'])
+              for value in ('passed', 'failed', 'unknown')}
+    return dict(status=verdict['status'], counts=counts,
+                tasks={row['task_id']: row for row in verdict['tasks']}, validation='record_only_not_body_revalidated')
+
+
 def comparison(result):
     lines = ["# 报告写作策略对照", "", f"Status: {result['status']}",
         f"Execution mode: {result['execution_mode']}",
         "固定 v1→v2 顺序，每任务每组一次生成，无修订；短资料模型辅助评分，不构成泛化或显著性证明。",
         "项目自编 rubric 仍待独立人工复核；默认保持 v1。", "",
         "Human review: pending; Final acceptance: pending（本入口不执行人工验收）。",
-        "下表通过率仅为模型辅助判定；scoring_failed组的未知结果不表示通过。", "",
-        "| 策略 | 任务通过率 | 生成 Token | 评分 Token |", "|---|---:|---:|---:|"]
+        "实验 complete 只表示评分流程完成；下表通过率保留原模型口径，不含长度约束。",
+        "应用状态从记录中的分项重新计算，不信任缓存徽标；本汇总未重新绑定正文，不替代 --check-result 验收。",
+        "缺失检查保持 unknown；invalid_record 表示记录不完整或不一致，不计作通过。", "",
+        "| 策略 | 原模型通过率 | 应用状态（记录视图） | 应用通过/失败/未知 | 记录校验 | 生成 Token | 评分 Token |",
+        "|---|---:|---|---|---|---:|---:|"]
     for version, arm in result["arms"].items():
-        lines.append(f"| {version} | {arm.get('task_success_rate')} | {arm.get('generation_total_tokens')} | {arm.get('evaluator_total_tokens')} |")
-    if result.get("pairs"):
+        view = application_view(arm)
+        counts = view['counts']
+        tally = '/'.join(str(counts[key]) for key in ('passed', 'failed', 'unknown')) if counts is not None else 'N/A'
+        lines.append(f"| {version} | {arm.get('task_success_rate')} | {view['status']} | {tally} | {view['validation']} "
+                     f"| {arm.get('generation_total_tokens')} | {arm.get('evaluator_total_tokens')} |")
+    pairs = paired_rows(result['arms']) if {'v1', 'v2'} <= set(result['arms']) else []
+    if pairs:
         lines += ["", "差值均为 v2 减 v1；未知保留 None。", "",
-            "| 任务 | v1通过 | v2通过 | 引用精度差 | 覆盖率差 | 生成Token差 |",
-            "|---|---|---|---:|---:|---:|"]
-        for row in result["pairs"]:
-            lines.append(f"| {row['task_id']} | {row['v1_success']} | {row['v2_success']} | {row['precision_delta']} | {row['coverage_delta']} | {row['token_delta']} |")
+            "| 任务 | v1原模型标签 | v2原模型标签 | v1长度 | v2长度 | v1应用 | v2应用 | 引用精度差 | 覆盖率差 | 生成Token差 |",
+            "|---|---|---|---|---|---|---|---:|---:|---:|"]
+        for row in pairs:
+            lines.append(f"| {row['task_id']} | {row['v1_success']} | {row['v2_success']} "
+                f"| {row['v1_constraint_gate']} | {row['v2_constraint_gate']} "
+                f"| {row['v1_application_gate']} | {row['v2_application_gate']} "
+                f"| {row['precision_delta']} | {row['coverage_delta']} | {row['token_delta']} |")
     lines += ["", "各组 summary.md 保留每任务引用精度、覆盖率、任务要求、失败和未知结果。",
         "不把缺失评分计为通过，不把未测成本计为零；无自动晋升。", ""]
     return "\n".join(lines)
 
 
 def paired_rows(arms):
-    left = {row["task_id"]: row for row in arms["v1"]["tasks"]}
-    right = {row["task_id"]: row for row in arms["v2"]["tasks"]}
+    def records(arm):
+        rows = arm['tasks']
+        ids = [row['task_id'] for row in rows]
+        if any(not isinstance(key, str) or not key for key in ids) or len(ids) != len(set(ids)):
+            raise RecoveryError('Comparison requires distinct task IDs in each arm.')
+        return {row['task_id']: row for row in rows}
+    left, right = records(arms['v1']), records(arms['v2'])
+    views = {key: application_view(arms[key]) for key in ('v1', 'v2')}
     def delta(a, b):
         return round(b-a, 6) if type(a) in {int, float} and type(b) in {int, float} else None
-    return [dict(task_id=key, v1_success=a.get("success"), v2_success=right.get(key, {}).get("success"),
-        precision_delta=delta(a.get("quality", {}).get("citation_precision"), right.get(key, {}).get("quality", {}).get("citation_precision")),
-        coverage_delta=delta(a.get("quality", {}).get("evidence_coverage"), right.get(key, {}).get("quality", {}).get("evidence_coverage")),
-        token_delta=delta(a.get("generation_metrics", {}).get("total_tokens"), right.get(key, {}).get("generation_metrics", {}).get("total_tokens")))
-        for key, a in left.items()]
+    paired = []
+    for key in dict.fromkeys([*left, *right]):
+        a, b = left.get(key, {}), right.get(key, {})
+        row = dict(task_id=key, v1_success=a.get('success'), v2_success=b.get('success'),
+            precision_delta=delta(a.get('quality', {}).get('citation_precision'), b.get('quality', {}).get('citation_precision')),
+            coverage_delta=delta(a.get('quality', {}).get('evidence_coverage'), b.get('quality', {}).get('evidence_coverage')),
+            token_delta=delta(a.get('generation_metrics', {}).get('total_tokens'), b.get('generation_metrics', {}).get('total_tokens')))
+        for version in ('v1','v2'):
+            state = views[version]['tasks'].get(key, {})
+            row[version+'_constraint_gate'] = state.get('constraint_gate', 'not_checked')
+            row[version+'_application_gate'] = state.get('application_gate', 'unknown')
+        paired.append(row)
+    return paired
+
+
+def render_comparison(source, directory):
+    raw = source.read_bytes()
+    result = json.loads(raw.decode('utf-8'))
+    if not isinstance(result.get('arms'), dict) or not set(result['arms']) <= {'v1','v2'}:
+        raise RecoveryError('Expected a report-policy result with v1/v2 arms.')
+    rendered = comparison(result)
+    if source.read_bytes() != raw:
+        raise RecoveryError('Result changed during comparison rendering.')
+    directory.mkdir(parents=True, exist_ok=False)
+    atomic_text(directory/'summary.md', rendered)
+    atomic_text(directory/'provenance.json', json.dumps(dict(mode='offline_comparison',
+        source_sha256=digest(raw.decode('utf-8')), api_requests=0, scoring_recomputed=False,
+        scope='record_view_not_frozen_body_acceptance', human_review='pending', final_acceptance='pending'), indent=2))
 
 
 def execute_plan(directory, *, evaluator=None):
@@ -179,7 +231,9 @@ def execute_plan(directory, *, evaluator=None):
 
 def main():
     parser = argparse.ArgumentParser(description="Prepare a frozen report policy pilot or execute a saved plan once")
-    parser.add_argument("--execute-plan", type=Path)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--execute-plan", type=Path)
+    mode.add_argument('--summarize-result', type=Path, help='Render a saved comparison offline; formatting only, no acceptance')
     parser.add_argument("--dataset", type=Path)
     parser.add_argument("--model")
     parser.add_argument("--limit", type=int)
@@ -188,11 +242,18 @@ def main():
     parser.add_argument("--timeout", type=float)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
+    if args.summarize_result and any(getattr(args,key) is not None for key in ('dataset','model','limit','task_ids','max_model_calls','timeout')):
+        parser.error('Offline rendering accepts only a saved result and an output directory.')
     if args.execute_plan and any(getattr(args, key) is not None for key in ("dataset", "model", "limit", "task_ids", "max_model_calls", "timeout", "output")):
         parser.error("Execution accepts only the frozen plan directory, no replacements.")
     if args.task_ids is not None and args.limit is not None:
         parser.error('--task-id and --limit are mutually exclusive.')
     try:
+        if args.summarize_result:
+            directory = (args.output or Path('runs/report-comparison-views'))/uuid4().hex
+            render_comparison(args.summarize_result, directory)
+            print(f'Offline comparison; zero API; formatting only: {directory / "summary.md"}')
+            return 0
         if args.execute_plan:
             load_dotenv()
             if not os.getenv("DEEPSEEK_API_KEY", "").strip():
