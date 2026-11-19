@@ -366,3 +366,49 @@ def test_import_missing_model_quality_is_bound_as_missing(review_case, tmp_path,
         assert outcome["model_task_success_rate"] is None
         assert outcome["disagreements"] == []
         assert not quality_path.exists()
+
+
+@pytest.mark.parametrize('mutation', ['body', 'evidence', 'label_text', 'duplicate_label', 'missing_binding'])
+def test_comparison_rejects_unbound_material(review_case, tmp_path, mutation):
+    import sqlite3
+    from researchdesk.evaluation_audit import compare_evaluations
+    baseline, candidate = comparison_fixture(review_case, tmp_path)
+    run = candidate / 'tasks/case/research' / ('a' * 32)
+    quality_path = candidate / 'citation-quality.json'
+    if mutation == 'body':
+        (run / 'draft.md').write_text('Changed report.', encoding='utf-8')
+    elif mutation == 'evidence':
+        connection = sqlite3.connect(run / 'application.sqlite3')
+        try:
+            evidence = json.loads(connection.execute("SELECT payload FROM records WHERE kind='evidence'").fetchone()[0])
+            evidence['snippet'] = 'Changed evidence.'
+            connection.execute("UPDATE records SET payload=? WHERE kind='evidence'", (json.dumps(evidence),))
+            connection.commit()
+        finally:
+            connection.close()
+    elif mutation == 'missing_binding':
+        path = candidate / 'result.json'
+        result = json.loads(path.read_text(encoding='utf-8'))
+        result.pop('quality_input_sha256')
+        path.write_text(json.dumps(result), encoding='utf-8')
+    else:
+        quality = json.loads(quality_path.read_text(encoding='utf-8'))
+        if mutation == 'label_text':
+            quality['units'][0]['text'] = 'Unrelated report.'
+        else:
+            quality['units'].append(quality['units'][0])
+        quality_path.write_text(json.dumps(quality), encoding='utf-8')
+    with pytest.raises(VerificationError):
+        compare_evaluations(baseline, candidate)
+
+
+def test_comparison_missing_labels_are_unavailable_not_agreement(review_case, tmp_path):
+    from researchdesk.evaluation_audit import compare_evaluations, audit_summary
+    baseline, candidate = comparison_fixture(review_case, tmp_path)
+    (candidate / 'citation-quality.json').unlink()
+    audit = compare_evaluations(baseline, candidate)
+    assert audit['citation_label_comparison_status'] == 'unavailable'
+    assert audit['candidate_citation_quality_sha256'] is None
+    assert audit['unchanged_report_citation_disagreements'] == []
+    assert audit['unchanged_reports'] == 1
+    assert 'unavailable' in audit_summary(audit)
