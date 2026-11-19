@@ -60,3 +60,5 @@
 [前提正文单次修订](premise-body-pilot.md)记录未改善的引用指标、业务 rubric 漏检的长度约束及不晋升决定。
 
 [正文确定性约束](body-constraints.md)说明计数合同、独立应用检查状态、历史兼容和零 API 重检入口。
+
+[计数合同两题真实对照](counting-contract-pilot.md)记录15次真实请求、3份超长正文、模型与应用门槛差异及不晋升决定。
