@@ -1,0 +1,84 @@
+{
+  "version": "evidence-v2",
+  "name": "factuality-boundary-dev-v1",
+  "scope": "Six constructed development cases in one fixed batch; not a replay of original reports or an independent benchmark",
+  "label_status": "agent_authored_candidate_references_not_human_gold",
+  "human_review": "pending",
+  "cases": [
+    {
+      "id": "case01",
+      "claim": "本报告尚未核实 PostgreSQL 17 的锁行为与18版是否相同。",
+      "quotes": [],
+      "expected_factual": false,
+      "expected_verdicts": [],
+      "reference_reason": "只陈述本报告尚未核实，不确定数据库实际行为。",
+      "development_focus": "absence_of_verification"
+    },
+    {
+      "id": "case02",
+      "claim": "根据目前资料，无法确认 PostgreSQL 17 的锁行为与18版完全相同。",
+      "quotes": [],
+      "expected_factual": false,
+      "expected_verdicts": [],
+      "reference_reason": "表达现有研究的结论边界，不断言两版相同或不同。",
+      "development_focus": "cautious_abstention"
+    },
+    {
+      "id": "case03",
+      "claim": "建议逐项核对 PostgreSQL 17 官方文档后再作结论。",
+      "quotes": [],
+      "expected_factual": false,
+      "expected_verdicts": [],
+      "reference_reason": "纯建议，没有附加数据库能力的事实前提。",
+      "development_focus": "pure_advice"
+    },
+    {
+      "id": "case04",
+      "claim": "PostgreSQL 18中，冲突的锁模式不能由不同事务同时持有。",
+      "quotes": [
+        "# PostgreSQL 18 显式锁：选型摘记\n\n这是 ResearchDesk 根据 PostgreSQL 18 官方文档编写的局部中文摘记，不是网页完整快照。核对日期：2026-11-16。版本范围：18。\n\n冲突的锁模式不能由不同事务同时持有，非冲突锁可以并存。\n行锁会阻塞对同一行的写入者或加锁者；行锁本身不影响普通数据查询。\n例如 FOR UPDATE 锁定的行，在当前事务结束前会使其他事务对这些行的冲突更新或加锁操作等待。\n不能由 MVCC 推出同时更新同一行必定互不等待，也不能据此断言对所有不同行的更新都必定阻塞。"
+      ],
+      "expected_factual": true,
+      "expected_verdicts": [
+        "supported"
+      ],
+      "reference_reason": "明确断言18版的锁行为，摘记给出直接依据。",
+      "source_texts": [
+        "# PostgreSQL 18 显式锁：选型摘记\n\n这是 ResearchDesk 根据 PostgreSQL 18 官方文档编写的局部中文摘记，不是网页完整快照。核对日期：2026-11-16。版本范围：18。\n\n冲突的锁模式不能由不同事务同时持有，非冲突锁可以并存。\n行锁会阻塞对同一行的写入者或加锁者；行锁本身不影响普通数据查询。\n例如 FOR UPDATE 锁定的行，在当前事务结束前会使其他事务对这些行的冲突更新或加锁操作等待。\n不能由 MVCC 推出同时更新同一行必定互不等待，也不能据此断言对所有不同行的更新都必定阻塞。\n\n来源：https://www.postgresql.org/docs/18/explicit-locking.html\n"
+      ],
+      "development_focus": "lock_behavior_fact"
+    },
+    {
+      "id": "case05",
+      "claim": "这份摘记的版本范围为18，因此尚不能确认17版行为相同。",
+      "quotes": [
+        "# PostgreSQL 18 显式锁：选型摘记\n\n这是 ResearchDesk 根据 PostgreSQL 18 官方文档编写的局部中文摘记，不是网页完整快照。核对日期：2026-11-16。版本范围：18。\n\n冲突的锁模式不能由不同事务同时持有，非冲突锁可以并存。\n行锁会阻塞对同一行的写入者或加锁者；行锁本身不影响普通数据查询。\n例如 FOR UPDATE 锁定的行，在当前事务结束前会使其他事务对这些行的冲突更新或加锁操作等待。\n不能由 MVCC 推出同时更新同一行必定互不等待，也不能据此断言对所有不同行的更新都必定阻塞。"
+      ],
+      "expected_factual": true,
+      "expected_verdicts": [
+        "supported"
+      ],
+      "reference_reason": "包含可核查的资料版本范围，不能因后半句保留结论而排除整个单元。",
+      "source_texts": [
+        "# PostgreSQL 18 显式锁：选型摘记\n\n这是 ResearchDesk 根据 PostgreSQL 18 官方文档编写的局部中文摘记，不是网页完整快照。核对日期：2026-11-16。版本范围：18。\n\n冲突的锁模式不能由不同事务同时持有，非冲突锁可以并存。\n行锁会阻塞对同一行的写入者或加锁者；行锁本身不影响普通数据查询。\n例如 FOR UPDATE 锁定的行，在当前事务结束前会使其他事务对这些行的冲突更新或加锁操作等待。\n不能由 MVCC 推出同时更新同一行必定互不等待，也不能据此断言对所有不同行的更新都必定阻塞。\n\n来源：https://www.postgresql.org/docs/18/explicit-locking.html\n"
+      ],
+      "development_focus": "scope_plus_abstention"
+    },
+    {
+      "id": "case06",
+      "claim": "PostgreSQL 18中，冲突的锁模式不能由不同事务同时持有，因此建议核对17版官方文档。",
+      "quotes": [
+        "# PostgreSQL 18 显式锁：选型摘记\n\n这是 ResearchDesk 根据 PostgreSQL 18 官方文档编写的局部中文摘记，不是网页完整快照。核对日期：2026-11-16。版本范围：18。\n\n冲突的锁模式不能由不同事务同时持有，非冲突锁可以并存。\n行锁会阻塞对同一行的写入者或加锁者；行锁本身不影响普通数据查询。\n例如 FOR UPDATE 锁定的行，在当前事务结束前会使其他事务对这些行的冲突更新或加锁操作等待。\n不能由 MVCC 推出同时更新同一行必定互不等待，也不能据此断言对所有不同行的更新都必定阻塞。"
+      ],
+      "expected_factual": true,
+      "expected_verdicts": [
+        "supported"
+      ],
+      "reference_reason": "建议带有明确的锁行为事实前提，仍应归为包含事实的行。",
+      "source_texts": [
+        "# PostgreSQL 18 显式锁：选型摘记\n\n这是 ResearchDesk 根据 PostgreSQL 18 官方文档编写的局部中文摘记，不是网页完整快照。核对日期：2026-11-16。版本范围：18。\n\n冲突的锁模式不能由不同事务同时持有，非冲突锁可以并存。\n行锁会阻塞对同一行的写入者或加锁者；行锁本身不影响普通数据查询。\n例如 FOR UPDATE 锁定的行，在当前事务结束前会使其他事务对这些行的冲突更新或加锁操作等待。\n不能由 MVCC 推出同时更新同一行必定互不等待，也不能据此断言对所有不同行的更新都必定阻塞。\n\n来源：https://www.postgresql.org/docs/18/explicit-locking.html\n"
+      ],
+      "development_focus": "advice_with_factual_premise"
+    }
+  ]
+}
