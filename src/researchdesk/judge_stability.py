@@ -2,6 +2,7 @@
 import argparse
 import copy
 import itertools
+import hashlib
 import json
 import os
 import time
@@ -10,10 +11,11 @@ from pathlib import Path
 from uuid import uuid4
 from dotenv import load_dotenv
 from .ledger import now
-from .paired_eval import baseline_snapshot
+from .review import build_packet
 from .storage import atomic_text
-from .task_eval import load_taskset, quality_metrics
-from .verification import ModelJudge, VerificationError, assess, digest, failure_diagnostics, load_run, prepare, split_units
+from .task_eval import (load_taskset, quality_metrics, saved_quality, generation_contract_spec,
+                        task_suffix, common_suffix_hash)
+from .verification import ModelJudge, VerificationError, assess, digest, failure_diagnostics, prepare, SYSTEM_PROMPT_V2
 
 
 def payload_hash(payload):
@@ -21,26 +23,77 @@ def payload_hash(payload):
 
 
 def frozen_input(evaluation, dataset):
-    data, tasks, documents = load_taskset(dataset.resolve())
-    baseline, _, parents, _ = baseline_snapshot(evaluation.resolve(), data, tasks, documents)
-    units, evidence, sources = [], {}, {}
-    for task_id in baseline["selected_tasks"]:
-        report, found_evidence, found_sources, _ = load_run(Path(parents[task_id]["source_directory"]))
-        for unit in split_units(report):
-            unit.update(unit_id=task_id + ":" + unit["unit_id"], task_id=task_id)
-            units.append(unit)
-        evidence.update(found_evidence)
-        sources.update(found_sources)
+    """Validate a scored batch without imposing paired-repair generation defaults."""
+    evaluation, dataset = evaluation.resolve(), dataset.resolve()
+    raw_result = (evaluation / 'result.json').read_text(encoding='utf-8')
+    baseline = json.loads(raw_result)
+    _, tasks, _ = load_taskset(dataset)
+    packet = build_packet(evaluation, dataset)
+    quality, binding = saved_quality(evaluation, dataset, baseline)
+    if packet['result_sha256'] != digest(raw_result):
+        raise VerificationError('Evaluation changed during stability preflight.')
+    if (baseline.get('citation_judge_prompt_sha256') != digest(SYSTEM_PROMPT_V2)
+            or baseline.get('citation_judge_prompt_version') != 'report-quote-v2'
+            or quality.get('judge_prompt_sha256') != digest(SYSTEM_PROMPT_V2)
+            or quality.get('prompt_version') != 'report-quote-v2'):
+        raise VerificationError('Saved citation prompt differs from the supported stability judge.')
+    model = baseline.get('judge_model')
+    if not isinstance(model, str) or not model.strip():
+        raise VerificationError('Missing frozen citation judge model.')
+    selected = baseline['selected_tasks']
+    task_map = {task['id']: task for task in tasks}
+    records = {row['task_id']: row for row in baseline['tasks']}
+    contracts = baseline.get('generation_contracts')
+    if contracts is not None and (not isinstance(contracts, dict) or set(contracts) != set(selected)):
+        raise VerificationError('Generation contract identities differ from selected tasks.')
+    units, evidence, sources, selected_tasks, manifests = [], {}, {}, [], {}
+    for task in packet['tasks']:
+        task_id = task['task_id']
+        record = records[task_id]
+        if task['generation_status'] != 'completed':
+            raise VerificationError('Stability requires completed reports for every selected task.')
+        recorded_contract = contracts[task_id] if contracts is not None else None
+        version = recorded_contract.get('version') if isinstance(recorded_contract, dict) else 'legacy'
+        selected_task = dict(task_map[task_id], generation_contract=version)
+        spec = generation_contract_spec(selected_task)
+        if contracts is not None and recorded_contract != spec:
+            raise VerificationError('Saved generation contract changed or is unsupported.')
+        selected_tasks.append(selected_task)
+        run = evaluation / 'tasks' / task_id / 'research' / Path(record['run_directory']).name
+        manifest_path = run / 'run.json'
+        manifest_raw = manifest_path.read_text(encoding='utf-8')
+        manifest = json.loads(manifest_raw)
+        manifests[manifest_path] = manifest_raw
+        if record.get('model') != baseline.get('generator_model') or manifest.get('model') != baseline.get('generator_model'):
+            raise VerificationError('Generator model differs from the saved evaluation.')
+        question = selected_task['question'] + task_suffix(selected_task)
+        if version != 'legacy' and (record.get('generation_contract') != spec
+                or record.get('question_sha256') != digest(question) or manifest.get('question') != question):
+            raise VerificationError('Generation contract is not bound to the recorded research question.')
+        if version == 'legacy' and ((record.get('question_sha256') is not None and record['question_sha256'] != digest(question))
+                or (manifest.get('question') is not None and manifest['question'] != question)):
+            raise VerificationError('Legacy research question changed.')
+        units.extend(task['units'])
+        evidence.update(task['evidence'])
+        sources.update(task['sources'])
+    if ('task_prompt_suffix_sha256' not in baseline
+            or baseline['task_prompt_suffix_sha256'] != common_suffix_hash(selected_tasks)):
+        raise VerificationError('Saved generation suffix differs from recorded contracts.')
     payload, fingerprint = prepare(units, evidence, sources)
-    if fingerprint != baseline["quality_input_sha256"]:
-        raise VerificationError("Frozen judge input differs from the original scored input.")
-    controls = dict(baseline_directory=str(evaluation.resolve()),
-        baseline_result_sha256=digest((evaluation / "result.json").read_text(encoding="utf-8")),
-        dataset_sha256=baseline["dataset_sha256"], input_sha256=fingerprint,
-        judge_model=baseline["judge_model"], prompt_sha256=baseline["citation_judge_prompt_sha256"],
-        prompt_version=baseline["citation_judge_prompt_version"],
+    if fingerprint != baseline['quality_input_sha256'] or fingerprint != binding['input_sha256']:
+        raise VerificationError('Frozen judge input differs from the original scored input.')
+    if ((evaluation / 'result.json').read_text(encoding='utf-8') != raw_result
+            or hashlib.sha256((evaluation / 'citation-quality.json').read_bytes()).hexdigest() != binding['quality_sha256']
+            or any(path.read_text(encoding='utf-8') != raw for path, raw in manifests.items())):
+        raise VerificationError('Saved evaluation or labels changed during stability preflight.')
+    controls = dict(baseline_directory=str(evaluation), baseline_result_sha256=digest(raw_result),
+        baseline_quality_sha256=binding['quality_sha256'], dataset_sha256=baseline['dataset_sha256'],
+        input_sha256=fingerprint, generation_contracts=contracts,
+        task_prompt_suffix_sha256=baseline['task_prompt_suffix_sha256'],
+        judge_model=model, prompt_sha256=baseline['citation_judge_prompt_sha256'],
+        prompt_version=baseline['citation_judge_prompt_version'],
         settings=dict(temperature=0, max_tokens=8192, timeout=90, max_retries=0,
-                      response_format="json_object", thinking="disabled"))
+                      response_format='json_object', thinking='disabled'))
     return payload, controls
 
 

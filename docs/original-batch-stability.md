@@ -64,7 +64,7 @@ assert input_sha256 == binding['input_sha256'] == result['quality_input_sha256']
 assert len(payload['units']) == 12 and len(payload['evidence']) == 8
 ```
 
-此批次使用 body-length-v1 生成合同，而当前 judge_stability CLI 的 frozen_input 复用 legacy 配对修订校验，会拒绝该生成后缀；因此本轮采用上述现有绑定校验与 run_stability API，没有放宽原配对修订限制。重复付费复放应另行冻结输入、设置、次数及新目录，不能覆盖本次记录。
+本次实验执行时，judge_stability CLI 的 frozen_input 仍复用 legacy 配对修订校验，会拒绝该批次的 body-length-v1 生成后缀，因此当时采用上述绑定校验与 run_stability API，没有放宽配对修订限制。后续已修复[正式稳定性入口](judge-stability.md)，支持按保存合同预检；该代码修复没有追加付费复放。重复付费实验应另行冻结输入、设置、次数及新目录，不能覆盖本次记录。
 
 ## 解释与后续边界
 
