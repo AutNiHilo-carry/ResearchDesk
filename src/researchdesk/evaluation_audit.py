@@ -1,4 +1,4 @@
-"""Read-only comparison audit; never rerun graders or reinterpret existing scores."""
+"""Read-only comparison diagnostics; never rerun graders or overwrite existing scores."""
 import argparse
 import hashlib
 import json
@@ -6,10 +6,48 @@ import re
 from pathlib import Path
 from .review import fingerprint
 from .storage import atomic_text
-from .verification import VerificationError, digest, load_run, prepare, split_units
+from .verification import VerificationError, digest, load_run, prepare, split_units, covered_by_verdicts
 
 
 CONTROLS_VERSION = "evaluation-controls-v2"
+
+
+def _factuality_audit(task_rows, old_labels, new_labels, *, available, input_identical):
+    """Mechanical counts on already bound labels; never a semantic judgment."""
+    view = dict(status='unavailable', tasks=[], coverage_increase_task_ids=[],
+        not_compared_task_ids=[r['task_id'] for r in task_rows if r['report_changed'] is not False],
+        citation_input_identical=input_identical, original_scores_modified=False)
+    if not available:
+        return view
+    def counts(rows):
+        factual = [r for r in rows if r['factual']]
+        covered = sum(covered_by_verdicts(True, {link['verdict'] for link in r['links']}) for r in factual)
+        return dict(factual_units=len(factual), covered_units=covered,
+                    evidence_coverage=covered / len(factual) if factual else None)
+    changed = False
+    for task in task_rows:
+        if task['report_changed'] is not False:
+            continue
+        task_id = task['task_id']
+        before = {uid: r for uid, r in old_labels.items() if r['task_id'] == task_id}
+        after = {uid: r for uid, r in new_labels.items() if r['task_id'] == task_id}
+        excluded = [dict(unit_id=uid, text=r['text'], citations=r['citations'])
+                    for uid, r in before.items() if r['factual'] and not after[uid]['factual']]
+        included = [dict(unit_id=uid, text=r['text'], citations=r['citations'])
+                    for uid, r in after.items() if r['factual'] and not before[uid]['factual']]
+        old_counts, new_counts = counts(before.values()), counts(after.values())
+        old_ratio, new_ratio = old_counts['evidence_coverage'], new_counts['evidence_coverage']
+        increased = bool(excluded and old_ratio is not None and new_ratio is not None
+            and new_ratio > old_ratio and new_counts['factual_units'] < old_counts['factual_units']
+            and new_counts['covered_units'] <= old_counts['covered_units'])
+        if increased:
+            view['coverage_increase_task_ids'].append(task_id)
+        changed = changed or bool(excluded or included)
+        view['tasks'].append(dict(task_id=task_id, before=old_counts, after=new_counts,
+            excluded_units=excluded, included_units=included,
+            coverage_increased_with_fewer_factual_units=increased))
+    view['status'] = 'review_required' if changed else 'no_factuality_change' if view['tasks'] else 'no_unchanged_reports'
+    return view
 
 
 def compare_evaluations(baseline_directory, candidate_directory):
@@ -96,6 +134,13 @@ def compare_evaluations(baseline_directory, candidate_directory):
             ids = [link['evidence_id'] for link in links]
             if len(set(ids)) != len(ids) or set(ids) != set(expected[unit_id]['citations']):
                 raise VerificationError('Citation label references do not match current report units.')
+            for link in links:
+                verdict = link.get('verdict')
+                if verdict not in {'supported', 'partial', 'unsupported', 'contradicted', 'insufficient', 'not_applicable', 'invalid_evidence'}:
+                    raise VerificationError('Unknown citation verdict in saved labels.')
+                if ((row['factual'] and verdict == 'not_applicable')
+                        or (not row['factual'] and verdict not in {'not_applicable', 'invalid_evidence'})):
+                    raise VerificationError('Saved factual classification and citation verdict disagree.')
         return rows, quality_hash, 'bound_anchors'
     old_labels, old_quality_hash, old_status = labels(baseline_directory, materials[0], old_input)
     new_labels, new_quality_hash, new_status = labels(candidate_directory, materials[1], new_input)
@@ -113,6 +158,9 @@ def compare_evaluations(baseline_directory, candidate_directory):
             if eid in old_links and old_links[eid] != link["verdict"]:
                 differences.append(dict(unit_id=unit_id, evidence_id=eid, field="verdict",
                                         before=old_links[eid], after=link["verdict"]))
+    input_identical = old_input == new_input if old_input and new_input else None
+    factuality = _factuality_audit(rows, old_labels, new_labels,
+        available=old_status == new_status == 'bound_anchors', input_identical=input_identical)
     control_values = {key: baseline[key] for key in controls}
     control_values['generation_contracts'] = baseline.get('generation_contracts')
     control_hash = fingerprint(dict(version=CONTROLS_VERSION, controls=control_values))
@@ -125,7 +173,7 @@ def compare_evaluations(baseline_directory, candidate_directory):
         citation_input_binding=dict(baseline='verified' if old_input else 'not_recorded',
                                     candidate='verified' if new_input else 'not_recorded'),
         citation_label_validation='unit_anchors_and_reference_ids_not_semantic_regrading_or_metric_replay',
-        citation_input_identical=old_input == new_input if old_input and new_input else None,
+        citation_input_identical=input_identical, factuality_audit=factuality,
         unchanged_reports=sum(row["report_changed"] is False for row in rows),
         changed_reports=sum(row["report_changed"] is True for row in rows),
         unchanged_success_disagreements=[row["task_id"] for row in rows if row["report_changed"] is False
@@ -138,6 +186,15 @@ def compare_evaluations(baseline_directory, candidate_directory):
 def audit_summary(audit):
     if audit.get("status") != "comparison_audited":
         return "# 配对实验审计\n\n审计未完成，不能据此判断修订效果。\n"
+    factuality = audit.get('factuality_audit', dict(status='unknown_legacy', tasks=[], coverage_increase_task_ids=[]))
+    details = []
+    for row in factuality['tasks']:
+        before, after = row['before'], row['after']
+        details.append(f"- {row['task_id']}：事实行 {before['factual_units']} → {after['factual_units']}；"
+            f"覆盖行 {before['covered_units']} → {after['covered_units']}；"
+            f"覆盖率 {before['evidence_coverage']} → {after['evidence_coverage']}；"
+            f"排除行 {[u['unit_id'] for u in row['excluded_units']]}。")
+    detail_text = '\n'.join(details)
     return ("# 配对实验审计\n\n"
         f"控制条件指纹版本：{audit.get('controls_version', 'legacy_unversioned')}。\n\n"
         f"正文未变化：{audit['unchanged_reports']}；正文变化：{audit['changed_reports']}。\n\n"
@@ -145,6 +202,9 @@ def audit_summary(audit):
         f"引用标签比较状态：{audit.get('citation_label_comparison_status', 'unknown_legacy')}；不可比较时空分歧列表不代表一致。\n\n"
         f"未变正文的通过判定分歧：{audit['unchanged_success_disagreements']}。\n\n"
         f"未变正文的事实/引用标签分歧：{len(audit['unchanged_report_citation_disagreements'])} 项。\n\n"
+        f"事实分母检查：{factuality['status']}；覆盖率升高伴随事实排除的任务：{factuality['coverage_increase_task_ids']}。\n\n"
+        f"{detail_text}\n\n"
+        "事实行被排除导致的更高覆盖率需要复核，不能据此认定正文改进；零事实行的覆盖率为未知。\n\n"
         "相同正文的评分差异不能归因于报告修订；需人工复核及重复实验。单次运行不能量化评分方差。\n")
 
 

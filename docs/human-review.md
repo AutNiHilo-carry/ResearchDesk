@@ -79,3 +79,15 @@ assert audit['controls_sha256'] == fingerprint({
 fingerprint 使用保留 Unicode、按键排序的 JSON 文本计算 SHA256。缺少历史生成合同记录时，controls.generation_contracts 为 null，不推断成 legacy 默认值；有记录与缺少记录因此能在指纹中区分。左右合同不一致仍会拒绝，既有其他控制条件比较保持不变。
 
 旧审计没有 controls_version，其 controls_sha256 未覆盖生成合同，不与 v2 哈希直接比较；摘要显示 legacy_unversioned。新版本不会修改旧审计、报告或分数，需要时从原材料重新离线审计并另存输出。这个指纹证明记录内容的绑定，不证明声明符合实际执行、模型后端快照相同或某个策略有效；它也不包含全部修订参数，不能用同一指纹宣称整个实验配置完全相同。
+
+## 事实分母变化诊断
+
+对两侧评分均可比较且正文未变的任务，审计新增 factuality_audit：按已绑定的 factual 和引用 verdict 重算事实行数、覆盖行数与覆盖率，列出事实→非事实的 excluded_units 以及反向的 included_units。覆盖定义与原验证器共用：事实行至少有一条 supported 且没有 contradicted 才算覆盖；不把多个 partial 合并为 supported。
+
+出现分类集合变化即标记 review_required；如果事实行减少、覆盖率升高且覆盖行没有增加，额外列入 coverage_increase_task_ids。摘要展示前后分子／分母和被排除的单元，防止把“少算了一条未覆盖事实”解读为正文质量提高。它不判定哪一次分类正确，也不自动恢复旧分类或更改验收门槛。
+
+这些计数来自标签，不信任缓存的 covered 或聚合覆盖率；这不是完整缓存指标一致性验收。未知 verdict 或 factual 与引用 verdict 的非法组合在计数前拒绝，invalid_evidence 仍按原派生标签规则处理。评分缺失显示 unavailable，正文变化的任务不作同文排除诊断；零事实行的覆盖率为 null，不能当作100%。同文任务的全批次评分上下文是否一致另由 citation_input_identical 标识，不据此推断采样或后端变化的原因。
+
+入口与[现有同文审计](#同文重评审计)相同，输出仍只是诊断，成功退出不表示任务通过；原报告和成绩不写回。回归覆盖覆盖率因排除升高、排除已覆盖行但未升高、全部排除、仅引用变化、缺失评分与未知标签，并确认原文件未变。测试标注不代表真实人工参考，本轮实现不调用模型。
+
+已对[真实 v2 复放](v2-formal-stability.md)保存的两轮标签作零 API 验证：版本题事实行4→3但覆盖率仍为1.0；WAL题事实行5→4、覆盖行4→4、覆盖率0.8→1.0，两轮均将 WAL 列入需要关注的任务。诊断附件在本地 `runs/factuality-denominator-diagnostics/35a0644687b14285ad991c9995363acd/result.json`；该附件是经输入及标签核验后的计数视图，不是一次新的完整任务评测。另核对真实 v1/v2 正文不同的比较返回 no_unchanged_reports，不误套同文结论。

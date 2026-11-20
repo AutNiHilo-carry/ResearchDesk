@@ -220,6 +220,10 @@ def prepare(units, evidence, sources, *, max_units=60, max_chars=60000):
     return payload, digest(encoded)
 
 
+def covered_by_verdicts(factual, verdicts):
+    return factual and "supported" in verdicts and "contradicted" not in verdicts
+
+
 def assess(payload, judge):
     raw = judge(payload)
     batch = JudgmentBatch.model_validate(raw)
@@ -247,7 +251,7 @@ def assess(payload, judge):
             links.append(dict(evidence_id=link.evidence_id, verdict=verdict, reason=reason))
         labels = {link["verdict"] for link in links}
         conflict = "supported" in labels and "contradicted" in labels
-        covered = result.factual and "supported" in labels and "contradicted" not in labels
+        covered = covered_by_verdicts(result.factual, labels)
         rows.append(dict(**unit, factual=result.factual, reason=result.reason,
                          links=links, covered=covered, source_conflict=conflict))
     rows.sort(key=lambda row: list(expected).index(row["unit_id"]))
