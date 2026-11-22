@@ -1,6 +1,6 @@
 # 文档导航
 
-首次运行从 [快速开始](quickstart.md) 开始；项目定位和完成边界见 [当前阶段](status-20261119.md) 与 [方向约束](direction.md)。
+首次运行从 [快速开始](quickstart.md) 开始；项目定位和完成边界见 [当前阶段](status-20261122.md) 与 [方向约束](direction.md)。
 
 ## 运行与交付
 
@@ -29,6 +29,7 @@
 - [技术选型8题](technical-selection-eval.md)、[开发侧审查](technical-selection-review-v1.md)、[模型首轮结果](technical-selection-pilot-v1.md)
 - [评分合同校准](task-grading-calibration.md)、[长正文目标项复核](task-grading-replay.md)、[完整批次稳定性](task-grading-stability.md)
 - [技术选型人工材料](technical-selection-human-review.md)、[引用评分分歧](judge-consistency.md)、[引用评分稳定性](judge-stability.md)
+- [保存评分的人工复核操作指南](stability-review-guide.md)：全量上下文、另存空表、专用意见记录与未知状态
 
 ## 作用域、推断与候选参考
 
@@ -39,7 +40,7 @@
 ## Context 与历史
 
 - [Context 对照实验](context-experiment.md)、[搜索返回预览](search-preview.md)
-- [2026-11-19 当前交付](status-20261119.md)、[2026-11-17 阶段快照](status-20261117.md)、[2026-11-16 阶段快照](status-20261116.md)
+- [2026-11-22 当前交付](status-20261122.md)、[2026-11-19 阶段快照](status-20261119.md)、[2026-11-17 阶段快照](status-20261117.md)、[2026-11-16 阶段快照](status-20261116.md)
 
 文档中的本地 runs 路径不代表公开附件。固定样例、脚本供应商、模型评分与真实人工标签分别标识；不把任一类自动转换成另一类。
 
