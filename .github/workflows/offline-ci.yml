@@ -67,6 +67,24 @@ jobs:
           foreach ($name in @('result.json', 'summary.md')) {
             Copy-Item -LiteralPath (Join-Path $gap[0] $name) -Destination (Join-Path artifacts/model-response-gap $name)
           }
+      - name: Collect opinion-publication kill evidence
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $directories = @(Get-ChildItem -LiteralPath runs/ci-pytest -Directory -Filter 'test_review_publication_kill_*' | Where-Object { $_.Name -match '^test_review_publication_kill_.*[0-9]+$' })
+          if ($directories.Count -ne 4) { throw 'Expected four numbered opinion-publication kill cases' }
+          $receipts = @($directories | ForEach-Object { Get-Content -Raw -LiteralPath (Join-Path $_.FullName 'publication-receipt.json') | ConvertFrom-Json })
+          $expected = @('body-length-v1/after_result_publish', 'body-length-v1/before_result_publish', 'legacy/after_result_publish', 'legacy/before_result_publish')
+          $actual = @($receipts | ForEach-Object { "$($_.generation_contract)/$($_.boundary)" } | Sort-Object)
+          if (@(Compare-Object $expected $actual).Count -ne 0) { throw 'Opinion-publication cases do not cover the expected matrix' }
+          foreach ($row in $receipts) {
+            if ($row.version -ne 'stability-review-publication-kill-v1' -or $row.process_killed -ne $true -or $row.process_exit_code -eq 0 -or $row.attachments_present -ne $true -or $row.source_files_unchanged -ne $true -or $row.old_output_rejected -ne $true -or $row.fresh_output_recorded -ne $true -or $row.model_requests -ne 0 -or $row.search_requests -ne 0 -or $row.label_status -ne 'synthetic_not_independent_human' -or $row.final_acceptance -ne 'pending') { throw 'Invalid opinion-publication receipt' }
+            if ($row.canonical_result_present -ne ($row.boundary -eq 'after_result_publish')) { throw 'Publication marker differs from kill boundary' }
+          }
+          New-Item -ItemType Directory -Path artifacts/opinion-publication -Force | Out-Null
+          [ordered]@{ version='opinion-publication-matrix-v1'; status='verified'; cases=$receipts; model_requests=0; search_requests=0; scope='synthetic opinions; process kill, not power-loss durability or research quality' } | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 -LiteralPath artifacts/opinion-publication/result.json
+          @('# Opinion-publication process-kill matrix', '', 'Four cases verified. Synthetic opinions only; zero model/search requests.', '', '| Contract | Kill boundary | Canonical result |', '|---|---|---|') + @($receipts | ForEach-Object { "| $($_.generation_contract) | $($_.boundary) | $($_.canonical_result_present) |" }) | Set-Content -Encoding utf8 -LiteralPath artifacts/opinion-publication/summary.md
+          Write-Output 'Opinion-publication kill matrix verified: 4 cases; zero model/search requests.'
       - name: Fixed-fixture mechanism acceptance
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: python -m researchdesk.acceptance_demo --output runs/ci-acceptance
@@ -111,6 +129,8 @@ jobs:
             artifacts/model-response-gap/summary.md
             artifacts/recovery-matrix/result.json
             artifacts/recovery-matrix/summary.md
+            artifacts/opinion-publication/result.json
+            artifacts/opinion-publication/summary.md
             runs/ci-acceptance/summary.md
             runs/ci-acceptance/result.json
             runs/ci-acceptance/fixture-quality.json
