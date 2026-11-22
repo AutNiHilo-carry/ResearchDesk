@@ -5,6 +5,7 @@ import itertools
 import hashlib
 import json
 import os
+import re
 import time
 from collections import Counter
 from pathlib import Path
@@ -192,6 +193,41 @@ def run_stability(payload, controls, directory, judge_factory, *, repeats=3):
     return result
 
 
+def stability_review_materials(payload, audit, tasks):
+    """All scored units, no machine labels; a blank form is not a human reference."""
+    selected = {row['task_id'] for row in payload['units']}
+    context = dict(version='stability-review-context-v1',
+        scope='posthoc_all_scored_units_not_independent_blind_review',
+        audit_content_sha256=payload_hash(audit), input_sha256=payload_hash(payload),
+        tasks=[dict(task_id=task['id'], question=task['question']) for task in tasks if task['id'] in selected],
+        payload=copy.deepcopy(payload))
+    template = dict(version='stability-review-template-v1', context_sha256=payload_hash(context),
+        reviewer='', reviewed_at='', status='pending',
+        units=[dict(unit_id=row['unit_id'], factual=None, atomic_claims=[], reason='') for row in payload['units']])
+    # Dynamic fences preserve report text containing backticks as literal reading material.
+    def literal(text):
+        fence = '`' * (max([len(part) for part in re.findall(r'`+', text)] + [2]) + 1)
+        return fence + '\n' + text + '\n' + fence
+    lines = ['# 稳定性结果人工复核材料', '',
+        '以下是完整评分输入中的所有行及引用摘录，不包含机器事实性标签或判分理由。',
+        '正文经过原评分入口分行，摘录不是完整原文；需要更多资料时应另行查看来源，不把缺失资料当作反证。',
+        '这是事后复核材料，不是独立盲测；一致性与人工正确性分别记录。', '',
+        '先阅读全部上下文，再另存填写 review-template.json。逐行填写 factual、拆分原子主张并说明理由；',
+        '不能仅根据“建议”“不能确认”等词判断。无法判断时保留 null 并说明资料缺口。',
+        '审核者和时间均为自报信息。空表不算人工审核，也不能传给 researchdesk.review import。',
+        '机器差异与历史标签另见 audit.json，建议先独立记录意见再查看；程序不会导入或自动晋升标签。', '']
+    for task in context['tasks']:
+        lines.extend(['## 任务', literal(task['task_id']), '原问题：', literal(task['question'])])
+        for row in payload['units']:
+            if row['task_id'] == task['task_id']:
+                lines.extend(['### 评分行', literal(row['unit_id']), literal(row['text']),
+                              '引用 ID：', literal(json.dumps(row['citations'], ensure_ascii=False))])
+    lines.extend(['## 评分输入中的引用资料', ''])
+    for evidence in payload['evidence']:
+        lines.append(literal(json.dumps(evidence, ensure_ascii=False, indent=2)))
+    return context, template, '\n\n'.join(lines) + '\n'
+
+
 def check_stability_result(evaluation, dataset, source, directory):
     """Validate stored official trials offline, preserving historical labels and failures."""
     from .evaluation_audit import _factuality_audit
@@ -273,6 +309,8 @@ def check_stability_result(evaluation, dataset, source, directory):
         exit_code=0 if status == 'passed' else 3, reasons=reasons, api_requests=0,
         audit_content_sha256=payload_hash(audit), human_review='pending', final_acceptance='pending',
         scope='historical_factuality_consistency_not_citation_correctness_or_task_acceptance', promotion='none')
+    _, review_tasks, _ = load_taskset(dataset)
+    context, template, reading = stability_review_materials(payload, audit, review_tasks)
     after_payload, after_controls = frozen_input(evaluation, dataset)
     if (source.read_bytes() != raw or input_path.read_bytes() != raw_input
             or after_payload != payload or after_controls != controls):
@@ -280,10 +318,15 @@ def check_stability_result(evaluation, dataset, source, directory):
     directory.mkdir(parents=True, exist_ok=False)
     atomic_text(directory/'audit.json', json.dumps(audit, ensure_ascii=False, indent=2))
     atomic_text(directory/'gate.json', json.dumps(gate, ensure_ascii=False, indent=2))
+    atomic_text(directory/'review-context.json', json.dumps(context, ensure_ascii=False, indent=2))
+    atomic_text(directory/'review-template.json', json.dumps(template, ensure_ascii=False, indent=2))
+    atomic_text(directory/'review.md', reading)
     atomic_text(directory/'summary.md', '# Saved stability factuality check\n\n'
         + f"Status: {status}; exit code: {gate['exit_code']}; valid trials: {valid}/{planned}.\n\n"
         + f"Reasons: {reasons}.\n\nZero new API requests; historical labels unchanged; human review pending.\n"
-        + 'Agreement is not correctness or task acceptance. Incomplete trials are not retried.\n')
+        + 'Agreement is not correctness or task acceptance. Incomplete trials are not retried.\n\n'
+        + 'Read [review.md](review.md) and save a separate filled copy of [review-template.json](review-template.json). '
+        + 'All scored units are included; labels remain blank. No automatic import or promotion.\n')
     return gate
 
 

@@ -37,6 +37,22 @@ def test_offline_cli_check_does_not_load_credentials_or_call_model(completed_bat
     verdict = json.loads(next(output.glob('*/gate.json')).read_text(encoding='utf-8'))
     assert verdict['status'] == 'passed' and verdict['api_requests'] == 0
     assert verdict['human_review'] == verdict['final_acceptance'] == 'pending'
+    folder = next(output.iterdir())
+    context = json.loads((folder/'review-context.json').read_text(encoding='utf-8'))
+    form = json.loads((folder/'review-template.json').read_text(encoding='utf-8'))
+    audit = json.loads((folder/'audit.json').read_text(encoding='utf-8'))
+    assert context['audit_content_sha256'] == verdict['audit_content_sha256'] == stability.payload_hash(audit)
+    assert context['payload'] == json.loads(source.with_name('input.json').read_text(encoding='utf-8'))
+    assert context['input_sha256'] == stability.payload_hash(context['payload'])
+    assert form['context_sha256'] == stability.payload_hash(context)
+    assert form['reviewer'] == form['reviewed_at'] == '' and form['status'] == 'pending'
+    assert [r['unit_id'] for r in form['units']] == [r['unit_id'] for r in context['payload']['units']]
+    assert all(r['factual'] is None and r['atomic_claims'] == [] and r['reason'] == '' for r in form['units'])
+    assert 'factual' not in json.dumps(context)
+    reading = (folder/'review.md').read_text(encoding='utf-8')
+    assert all(r['text'] in reading for r in context['payload']['units'])
+    assert all(r['question'] in reading for r in context['tasks'])
+    assert 'Injected test label' not in reading
     assert {p: p.read_bytes() for root in (evaluation, source.parent) for p in root.rglob('*') if p.is_file()} == before
 
 
@@ -46,6 +62,15 @@ def test_new_trials_agreeing_with_each_other_can_still_require_review(completed_
     gate = stability.check_stability_result(evaluation, dataset, source, tmp_path / 'view')
     assert gate['status'] == 'review_required' and gate['exit_code'] == 3
     assert 'historical_factuality_changed' in gate['reasons']
+    form = json.loads((tmp_path/'view/review-template.json').read_text(encoding='utf-8'))
+    assert all(r['factual'] is None and not r['reason'] for r in form['units'])
+
+
+def test_review_reading_keeps_untrusted_backticks_inside_literal_blocks():
+    payload = dict(units=[dict(task_id='case', unit_id='case:U1', text='```\n# Embedded heading', citations=[])], evidence=[])
+    context, form, reading = stability.stability_review_materials(payload, {}, [dict(id='case', question='Question')])
+    assert '````\n```\n# Embedded heading\n````' in reading
+    assert context['payload'] == payload and form['units'][0]['factual'] is None
 
 
 def test_interrupted_result_is_unknown_and_does_not_resume(completed_batch, tmp_path):

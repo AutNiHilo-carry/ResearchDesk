@@ -277,6 +277,16 @@ def saved_stability_smoke(root, module, baseline, dataset, stable_judge, exclude
             require(gate['status']==status and gate['exit_code']==code and gate['api_requests']==0,
                     'Installed saved-result check lost its status or zero-request boundary.')
             require(gate['audit_content_sha256']==payload_hash(audit), 'Saved-result audit binding changed.')
+            context = json.loads(gates[0].with_name('review-context.json').read_text(encoding='utf-8'))
+            form = json.loads(gates[0].with_name('review-template.json').read_text(encoding='utf-8'))
+            require(context['audit_content_sha256']==gate['audit_content_sha256']
+                    and context['payload']==payload and form['context_sha256']==payload_hash(context),
+                    'Installed review material lost its full-input or audit binding.')
+            require([r['unit_id'] for r in form['units']]==[r['unit_id'] for r in payload['units']]
+                    and form['reviewer']==form['reviewed_at']=='' and form['status']=='pending'
+                    and all(r['factual'] is None and r['reason']=='' and r['atomic_claims']==[] for r in form['units']),
+                    'Installed review template must cover all units and keep human fields blank.')
+            require(gates[0].with_name('review.md').is_file(), 'Installed review reading material missing.')
             require(gate['human_review']==gate['final_acceptance']=='pending' and gate['promotion']=='none',
                     'Saved-result consistency must not promote human or task acceptance.')
             if status == 'review_required':
