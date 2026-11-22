@@ -91,3 +91,21 @@ fingerprint 使用保留 Unicode、按键排序的 JSON 文本计算 SHA256。�
 入口与[现有同文审计](#同文重评审计)相同，输出仍只是诊断，成功退出不表示任务通过；原报告和成绩不写回。回归覆盖覆盖率因排除升高、排除已覆盖行但未升高、全部排除、仅引用变化、缺失评分与未知标签，并确认原文件未变。测试标注不代表真实人工参考，本轮实现不调用模型。
 
 已对[真实 v2 复放](v2-formal-stability.md)保存的两轮标签作零 API 验证：版本题事实行4→3但覆盖率仍为1.0；WAL题事实行5→4、覆盖行4→4、覆盖率0.8→1.0，两轮均将 WAL 列入需要关注的任务。诊断附件在本地 `runs/factuality-denominator-diagnostics/35a0644687b14285ad991c9995363acd/result.json`；该附件是经输入及标签核验后的计数视图，不是一次新的完整任务评测。另核对真实 v1/v2 正文不同的比较返回 no_unchanged_reports，不误套同文结论。
+
+## 显式事实分类门槛
+
+自动化需要退出码时，可显式启用：
+
+```powershell
+python -m researchdesk.evaluation_audit runs/baseline-eval runs/regraded-eval --output runs/factuality-gates/new --gate factuality
+```
+
+示例输入目录需替换为已有的两份评测，输出必须为新目录；命令零 API。不加 --gate 时仍是兼容的诊断模式，格式化成功返回0，即使摘要提示复核，也不能把退出0当作任务通过。
+
+--gate factuality 会另存 gate.json，并在摘要记录状态：0表示两侧评测完整、完整引用输入相同、全部正文未变且事实分类集合无变化；3表示 review_required 或 unknown，不放行。未知包括缺失评分、旧审计信息不全、评测未完成、上下文不同或正文变化。非法输入仍失败返回1，参数错误由CLI返回2。
+
+gate.json 使用 factuality-comparison-gate-v1，audit_content_sha256 绑定 result.json 解析后的规范内容，可用 fingerprint(json.loads(...)) 复算。该哈希用于内容绑定，不认证作者。分类变化包括排除事实或新增事实，不仅检查总数是否相同；人工意见与最终验收仍pending，没有自动晋升。
+
+这个门槛只检查本次同文同输入的事实分类一致性，不验证引用 verdict 的正确性或一致性，也不验证缓存全部指标、业务验收与研究质量。0不是研究成功、报告改进或独立人工审核完成；资料不同或正文变化时返回3也不等于新报告一定有错。应用验收仍使用任务评测的独立门槛。
+
+已将真实 v2 历史引用标签与已保存的新轮次标签制成显式标识的离线审计副本：候选侧复用原正文和业务标签，仅替换引用标签并派生相应计数，历史用量标记为复制信息，不是新增消费；副本不是新的研究运行，也不用于恢复或统计新的任务成功。CLI实测同文分类变化返回3／review_required，同一历史标签与自身比较的接线校验返回0／passed，真实v1与v2正文不同的比较返回3／unknown。自比较不是独立重复实验。记录位于本地 `runs/factuality-gate-probes/4b22edf90c164e379f4af7a9e045678f/`，原v2目录逐文件哈希未变，整个验证零API。

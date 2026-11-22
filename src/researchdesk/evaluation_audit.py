@@ -164,7 +164,8 @@ def compare_evaluations(baseline_directory, candidate_directory):
     control_values = {key: baseline[key] for key in controls}
     control_values['generation_contracts'] = baseline.get('generation_contracts')
     control_hash = fingerprint(dict(version=CONTROLS_VERSION, controls=control_values))
-    return dict(status="comparison_audited", baseline_result_sha256=baseline_hash,
+    return dict(status="comparison_audited", baseline_status=baseline.get("status"),
+        candidate_status=candidate.get("status"), baseline_result_sha256=baseline_hash,
         candidate_result_sha256=candidate_hash, controls_version=CONTROLS_VERSION,
         controls=control_values, controls_sha256=control_hash,
         baseline_citation_quality_sha256=old_quality_hash, candidate_citation_quality_sha256=new_quality_hash,
@@ -181,6 +182,39 @@ def compare_evaluations(baseline_directory, candidate_directory):
             and row["baseline_success"] != row["candidate_success"]],
         unchanged_report_citation_disagreements=sorted(differences, key=lambda row: (row["unit_id"], row.get("evidence_id", ""))),
         tasks=rows, interpretation="Unchanged-report score differences are grader disagreement, not evidence of repair effect; no automatic promotion.")
+
+
+def factuality_gate(audit):
+    """An opt-in consistency gate, never task acceptance or semantic correctness."""
+    unknown, risks = [], []
+    view = audit.get('factuality_audit')
+    if not isinstance(view, dict):
+        view = {}
+    if audit.get('status') != 'comparison_audited':
+        unknown.append('audit_incomplete')
+    if any(audit.get(key) != 'complete' for key in ('baseline_status', 'candidate_status')):
+        unknown.append('evaluation_incomplete')
+    if audit.get('citation_label_comparison_status') != 'compared':
+        unknown.append('labels_unavailable')
+    if audit.get('citation_input_identical') is not True:
+        unknown.append('full_citation_input_not_identical')
+    rows = audit.get('tasks', [])
+    if not rows or any(row.get('report_changed') is not False for row in rows):
+        unknown.append('requires_complete_unchanged_reports')
+    checked_rows = view.get('tasks', [])
+    if (not checked_rows or len(checked_rows) != len(rows)
+            or {r['task_id'] for r in checked_rows} != {r['task_id'] for r in rows}):
+        unknown.append('factuality_coverage_incomplete')
+    if view.get('status') not in {'no_factuality_change', 'review_required'}:
+        unknown.append('factuality_check_unavailable')
+    if view.get('status') == 'review_required' or any(r.get('excluded_units') or r.get('included_units') for r in checked_rows):
+        risks.append('same_report_factuality_changed')
+    status = 'review_required' if risks else 'unknown' if unknown else 'passed'
+    return dict(version='factuality-comparison-gate-v1', gate='factuality', status=status,
+        exit_code=0 if status == 'passed' else 3, reasons=risks + unknown,
+        audit_content_sha256=fingerprint(audit),
+        scope='same_report_factuality_consistency_not_citation_correctness_or_task_acceptance',
+        human_review='pending', final_acceptance='pending', promotion='none')
 
 
 def audit_summary(audit):
@@ -213,14 +247,20 @@ def main():
     parser.add_argument("baseline", type=Path)
     parser.add_argument("candidate", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--gate", choices=["factuality"], help="Require identical-input factuality consistency; exit 3 for review or unknown")
     args = parser.parse_args()
     try:
         audit = compare_evaluations(args.baseline.resolve(), args.candidate.resolve())
+        verdict = factuality_gate(audit) if args.gate == "factuality" else None
         args.output.mkdir(parents=True, exist_ok=False)
         atomic_text(args.output / "result.json", json.dumps(audit, ensure_ascii=False, indent=2))
-        atomic_text(args.output / "summary.md", audit_summary(audit))
+        rendered = audit_summary(audit)
+        if verdict is not None:
+            atomic_text(args.output / "gate.json", json.dumps(verdict, ensure_ascii=False, indent=2))
+            rendered += f"\nFactuality gate: {verdict['status']}; exit code: {verdict['exit_code']}. Not task acceptance.\n"
+        atomic_text(args.output / "summary.md", rendered)
         print(f"Comparison audit: {args.output}; unchanged reports: {audit['unchanged_reports']}")
-        return 0
+        return verdict["exit_code"] if verdict is not None else 0
     except Exception as error:
         print(f"Comparison audit failed ({type(error).__name__}).")
         return 1

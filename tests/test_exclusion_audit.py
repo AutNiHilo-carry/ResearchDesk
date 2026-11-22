@@ -89,3 +89,56 @@ def test_unknown_verdict_is_rejected_before_counting(gap_evaluation, tmp_path):
     path.write_text(json.dumps(quality), encoding='utf-8')
     with pytest.raises(VerificationError):
         compare_evaluations(baseline, candidate)
+
+
+@pytest.mark.parametrize('gate,expected', [(False, 0), (True, 3)])
+def test_cli_keeps_diagnostics_compatible_but_explicit_gate_requires_review(gap_evaluation, tmp_path, monkeypatch, gate, expected):
+    import sys
+    from researchdesk import evaluation_audit as module
+    baseline, candidate = pair_with_labels(gap_evaluation, tmp_path, 'case:U3')
+    output = tmp_path / 'gate-output'
+    args = ['evaluation_audit', str(baseline), str(candidate), '--output', str(output)]
+    if gate:
+        args.extend(['--gate', 'factuality'])
+    monkeypatch.setattr(sys, 'argv', args)
+    assert module.main() == expected
+    if gate:
+        verdict = json.loads((output / 'gate.json').read_text(encoding='utf-8'))
+        assert verdict['status'] == 'review_required' and verdict['exit_code'] == 3
+        audit = json.loads((output / 'result.json').read_text(encoding='utf-8'))
+        from researchdesk.review import fingerprint
+        assert verdict['audit_content_sha256'] == fingerprint(audit)
+    else:
+        assert not (output / 'gate.json').exists()
+
+
+def test_gate_passes_unchanged_factuality_without_claiming_task_acceptance(gap_evaluation, tmp_path):
+    from researchdesk.evaluation_audit import factuality_gate
+    baseline, candidate = pair_with_labels(gap_evaluation, tmp_path)
+    gate = factuality_gate(compare_evaluations(baseline, candidate))
+    assert gate['status'] == 'passed' and gate['exit_code'] == 0
+    assert gate['human_review'] == gate['final_acceptance'] == 'pending'
+    assert gate['promotion'] == 'none'
+
+
+def test_gate_missing_scores_is_unknown_not_passed(gap_evaluation, tmp_path):
+    from researchdesk.evaluation_audit import factuality_gate
+    baseline, candidate = pair_with_labels(gap_evaluation, tmp_path)
+    (candidate / 'citation-quality.json').unlink()
+    gate = factuality_gate(compare_evaluations(baseline, candidate))
+    assert gate['status'] == 'unknown' and gate['exit_code'] == 3
+
+
+@pytest.mark.parametrize('mutation', ['context', 'unfinished', 'legacy'])
+def test_gate_requires_complete_same_context_audit(gap_evaluation, tmp_path, mutation):
+    from researchdesk.evaluation_audit import factuality_gate
+    baseline, candidate = pair_with_labels(gap_evaluation, tmp_path)
+    audit = compare_evaluations(baseline, candidate)
+    if mutation == 'context':
+        audit['citation_input_identical'] = False
+    elif mutation == 'unfinished':
+        audit['candidate_status'] = 'scoring_failed'
+    else:
+        audit.pop('factuality_audit')
+    gate = factuality_gate(audit)
+    assert gate['status'] == 'unknown' and gate['exit_code'] == 3
