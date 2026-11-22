@@ -47,3 +47,23 @@ python -m researchdesk.judge_stability runs/generation-contract-plans/5746f5fdbf
 ```
 
 控制记录新增生成合同、后缀哈希与历史评分文件哈希；旧合同记录缺失时只接受能按 legacy 后缀核对的历史批次，不伪造一份生成合同。重复评分次数与默认行为不变，没有自动恢复、补轮或覆盖旧结果。
+
+## 保存结果的零 API 核验
+
+已有正式稳定性结果可以直接核验，不必先手工复制成第二份评测目录：
+
+```powershell
+python -m researchdesk.judge_stability runs/generation-contract-plans/5746f5fdbf8547d3abe02f453d26ffd4/execution/v2 --dataset evals/technical-selection-v1.json --check-result runs/v2-formal-stability/13d4b90822d54de3ac288c2570726cea/executions/1e150d37df2a429a98a96b54e40417aa/result.json --output runs/stability-checks
+```
+
+此路径在加载 dotenv 或构建 ModelJudge 前返回，不需要 API Key，不调用模型，也不恢复或补跑轮次。不能同时提供 --repeats 替换已记录的次数；新付费评分入口仍默认3轮，原有行为保留。
+
+检查会重新核对原评测与历史缓存、控制条件、完整输入对象、逐轮身份及Prompt；对完成轮次确定性复算保存标签、指标和任务引用统计，再复算已有汇总。控制字段缺失或变化、错误文字／指标、重复轮次、伪造完成状态和观察到的文件漂移都拒绝。严格检查面向具备当前正式CLI完整绑定字段的结果，旧自定义API产物不因缺字段就被推断为可信结果。
+
+每个完成轮次另与冻结历史标签比较事实分类。新轮次彼此一致并不足以通过：相对历史发生事实分类变化，状态为 review_required；评分中断或存在未完成轮次，状态为 unknown。两者退出码均为3。只有预定轮次全部完成、保存记录核验通过且事实分类均与历史相同才返回0。非法记录返回1，参数错误返回2；失败和未知不会按0分或100%一致处理。
+
+输出到新的 audit.json、gate.json 与 summary.md；gate.json 采用 stability-factuality-gate-v1，并以 audit_content_sha256 绑定规范化审计内容。输出不能落在原评测或原稳定性目录内，任何原报告、缓存或标签都不写回。source_recorded_tokens 是旧结果记录的用量，不是检查新增消费，未知用量保持null。
+
+该门槛仅证明本次保存记录的事实分类一致性，不认证真实HTTP请求、作者或模型后端快照，也不证明引用正确、报告质量、任务通过或人工审核完成；human_review 与 final_acceptance 始终pending，不自动晋升策略。
+
+已在禁用socket/DNS、dotenv加载及ModelJudge构建的独立进程中检查[真实v2结果](v2-formal-stability.md)：完整2/2轮且内部事实一致率1.0，但两轮均相对历史出现事实排除，正式入口返回3／review_required。附件位于本地 `runs/stability-direct-checks/decbcf00817142389785341fde835499/294da5dce6e847c5bd485f412ab1fbad/`；源评测与稳定性目录逐文件哈希不变，新增API请求0。此检查没有重做模型评分。

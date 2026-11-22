@@ -192,6 +192,101 @@ def run_stability(payload, controls, directory, judge_factory, *, repeats=3):
     return result
 
 
+def check_stability_result(evaluation, dataset, source, directory):
+    """Validate stored official trials offline, preserving historical labels and failures."""
+    from .evaluation_audit import _factuality_audit
+    evaluation, source, directory = evaluation.resolve(), source.resolve(), directory.resolve()
+    if directory.is_relative_to(evaluation) or directory.is_relative_to(source.parent):
+        raise VerificationError('Check output must be outside the source evaluation and stability run.')
+    input_path = source.with_name('input.json')
+    if not input_path.resolve().is_relative_to(source.parent):
+        raise VerificationError('Saved stability input escapes its directory.')
+    raw, raw_input = source.read_bytes(), input_path.read_bytes()
+    result, stored_input = json.loads(raw.decode('utf-8')), json.loads(raw_input.decode('utf-8'))
+    payload, controls = frozen_input(evaluation, dataset)
+    recorded_controls = result.get('controls', {})
+    keys = [key for key in controls if key != 'baseline_directory']
+    if (not isinstance(recorded_controls, dict) or any(key not in recorded_controls for key in controls)
+            or payload_hash({k: recorded_controls[k] for k in keys}) != payload_hash({k: controls[k] for k in keys})
+            or Path(recorded_controls['baseline_directory']).resolve() != evaluation):
+        raise VerificationError('Recorded stability controls differ from the frozen evaluation.')
+    if stored_input != payload or payload_hash(stored_input) != controls['input_sha256']:
+        raise VerificationError('Recorded stability input differs from the original full payload.')
+    old_raw = (evaluation/'citation-quality.json').read_bytes()
+    if hashlib.sha256(old_raw).hexdigest() != controls['baseline_quality_sha256']:
+        raise VerificationError('Historical labels changed during the check.')
+    historical = {row['unit_id']: row for row in json.loads(old_raw.decode('utf-8'))['units']}
+    planned, trials, execution = result.get('planned_model_calls'), result.get('trials'), result.get('status')
+    if (type(planned) is not int or not 2 <= planned <= 5 or not isinstance(trials, list)
+            or len(trials) > planned or execution not in {'running', 'partial', 'complete'}):
+        raise VerificationError('Invalid saved stability execution state.')
+    task_rows = [dict(task_id=tid, report_changed=False) for tid in sorted({row['task_id'] for row in payload['units']})]
+    views, valid, changed = [], 0, False
+    for number, trial in enumerate(trials, 1):
+        if (type(trial.get('number')) is not int or trial['number'] != number
+                or trial.get('input_sha256') != controls['input_sha256']
+                or trial.get('status') not in {'started', 'failed', 'complete'}
+                or type(trial.get('request_started')) is not bool or type(trial.get('usage_complete')) is not bool):
+            raise VerificationError('Invalid trial identity, status or input binding.')
+        usage = trial.get('usage')
+        known_usage = isinstance(usage, dict) and all(type(usage.get(k)) is int and usage[k] >= 0
+                                                    for k in ('input_tokens', 'output_tokens', 'total_tokens'))
+        if trial['usage_complete'] != known_usage or (not trial['request_started'] and usage is not None):
+            raise VerificationError('Trial usage flags do not match recorded usage.')
+        view = None
+        if trial['status'] == 'complete':
+            saved = trial['quality']
+            if (not trial['request_started'] or saved.get('prompt_version') != controls['prompt_version']
+                    or saved.get('judge_prompt_sha256') != controls['prompt_sha256']):
+                raise VerificationError('Completed trial has inconsistent judge identity.')
+            def labels(_):
+                return dict(units=[{k: row[k] for k in ('unit_id', 'factual', 'reason', 'links')} for row in saved['units']])
+            labels.prompt_version, labels.prompt_sha256 = controls['prompt_version'], controls['prompt_sha256']
+            checked = assess(payload, labels)
+            if payload_hash(checked) != payload_hash(saved):
+                raise VerificationError('Saved trial rows or metrics differ from deterministic replay.')
+            metrics = {tid: quality_metrics([row for row in checked['units'] if row['task_id'] == tid])
+                       for tid in sorted({row['task_id'] for row in checked['units']})}
+            if payload_hash(metrics) != payload_hash(trial.get('task_metrics')):
+                raise VerificationError('Saved trial task metrics are inconsistent.')
+            view = _factuality_audit(task_rows, historical, {row['unit_id']: row for row in checked['units']},
+                                     available=True, input_identical=True)
+            changed = changed or view['status'] == 'review_required'
+            valid += 1
+        views.append(dict(number=number, status=trial['status'], factuality_audit=view))
+    complete = len(trials) == planned and valid == planned
+    if execution != 'running' and (len(trials) != planned or (execution == 'complete') != complete):
+        raise VerificationError('Saved completion state does not match its trials.')
+    recomputed = summarize_trials(payload, trials) if trials else {}
+    for key, value in recomputed.items():
+        if (execution != 'running' or key in result) and (key not in result or payload_hash(result[key]) != payload_hash(value)):
+            raise VerificationError('Saved stability summary differs from its trial records.')
+    complete = complete and execution == 'complete'
+    status = 'review_required' if changed else 'passed' if complete else 'unknown'
+    reasons = (['historical_factuality_changed'] if changed else []) + ([] if complete else ['execution_incomplete'])
+    audit = dict(version='stability-factuality-audit-v1', execution_status=execution,
+        planned_trials=planned, valid_trials=valid, trials=views,
+        new_trial_factual_agreement=recomputed.get('factual_pairwise_agreement'),
+        source_recorded_tokens=recomputed.get('total_tokens'), controls=controls,
+        source_result_sha256=hashlib.sha256(raw).hexdigest(), input_file_sha256=hashlib.sha256(raw_input).hexdigest())
+    gate = dict(version='stability-factuality-gate-v1', gate='factuality', status=status,
+        exit_code=0 if status == 'passed' else 3, reasons=reasons, api_requests=0,
+        audit_content_sha256=payload_hash(audit), human_review='pending', final_acceptance='pending',
+        scope='historical_factuality_consistency_not_citation_correctness_or_task_acceptance', promotion='none')
+    after_payload, after_controls = frozen_input(evaluation, dataset)
+    if (source.read_bytes() != raw or input_path.read_bytes() != raw_input
+            or after_payload != payload or after_controls != controls):
+        raise VerificationError('Stability source or evaluation changed during the check.')
+    directory.mkdir(parents=True, exist_ok=False)
+    atomic_text(directory/'audit.json', json.dumps(audit, ensure_ascii=False, indent=2))
+    atomic_text(directory/'gate.json', json.dumps(gate, ensure_ascii=False, indent=2))
+    atomic_text(directory/'summary.md', '# Saved stability factuality check\n\n'
+        + f"Status: {status}; exit code: {gate['exit_code']}; valid trials: {valid}/{planned}.\n\n"
+        + f"Reasons: {reasons}.\n\nZero new API requests; historical labels unchanged; human review pending.\n"
+        + 'Agreement is not correctness or task acceptance. Incomplete trials are not retried.\n')
+    return gate
+
+
 def summary(result):
     unstable = result["unstable_unit_ids"]
     return ("# 固定输入的引用评分一致性\n\n"
@@ -208,9 +303,22 @@ def main():
     parser = argparse.ArgumentParser(description="Bounded repeatability check on frozen citation-judge inputs")
     parser.add_argument("evaluation", type=Path)
     parser.add_argument("--dataset", type=Path, required=True)
-    parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--repeats", type=int, help="New scoring repeats, default 3; not accepted with --check-result")
     parser.add_argument("--output", type=Path, default=Path("runs/judge-stability"))
+    parser.add_argument("--check-result", type=Path, help="Validate saved trials offline and compare historical factuality; zero API calls")
     args = parser.parse_args()
+    if args.check_result is not None:
+        if args.repeats is not None:
+            parser.error("--check-result cannot replace the recorded repeat budget.")
+        directory = args.output / uuid4().hex
+        try:
+            gate = check_stability_result(args.evaluation, args.dataset, args.check_result, directory)
+            print(f"Offline stability factuality gate: {gate['status']}; zero API calls: {directory / 'gate.json'}")
+            return gate['exit_code']
+        except Exception as error:
+            print(f"Saved stability check failed ({type(error).__name__}); no new model request.")
+            return 1
+    args.repeats = 3 if args.repeats is None else args.repeats
     if not 2 <= args.repeats <= 5:
         parser.error("repeats must be 2..5")
     directory = args.output / uuid4().hex
