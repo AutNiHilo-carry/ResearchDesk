@@ -28,11 +28,16 @@ def guard(event, args):
         raise RuntimeError('Network disabled during wheel smoke')
 sys.addaudithook(guard)
 module = sys.argv[1]
-if module in {'researchdesk.task_eval', 'researchdesk.evaluation_audit'}:
+if module in {'researchdesk.task_eval', 'researchdesk.evaluation_audit', 'researchdesk.judge_stability'}:
     import dotenv
     def no_credentials(*args, **kwargs):
         raise RuntimeError('Credential loading disabled during offline gate smoke')
     dotenv.load_dotenv = no_credentials
+if module == 'researchdesk.judge_stability':
+    import researchdesk.verification
+    def no_model(*args, **kwargs):
+        raise RuntimeError('Model construction disabled during offline stability smoke')
+    researchdesk.verification.ModelJudge = no_model
 sys.argv = [module] + sys.argv[2:]
 runpy.run_module(module, run_name='__main__')
 '''
@@ -221,10 +226,69 @@ def factuality_gate_smoke(root, module):
             require(audit['factuality_audit']['coverage_increase_task_ids']==['case'],'Exclusion-driven gain was not identified.')
         receipts.append(dict(case=name,gate='factuality',exit_code=code,status=status))
         print(f'Factuality gate smoke {name}: {status}; exit {code}',flush=True)
+    stability_checks = saved_stability_smoke(root/'saved-stability', module, baseline, dataset, judge, relabel)
     require(all(snapshot(p)==before[p] for p in source_dirs),'Factuality gate modified fixture inputs.')
     require(all(p.read_bytes()==raw for p,raw in originals.items()),'Factuality gate changed its dataset.')
     return dict(execution_mode='injected_offline',cases=receipts,source_files_unchanged=True,
-                fixture_model_rates=dict(baseline=0,excluded=1),model_requests=0,search_requests=0)
+                fixture_model_rates=dict(baseline=0,excluded=1),saved_stability=stability_checks,
+                model_requests=0,search_requests=0)
+
+
+def saved_stability_smoke(root, module, baseline, dataset, stable_judge, excluded_judge):
+    """Scripted saved trials, checked through the real isolated installed CLI."""
+    from researchdesk.judge_stability import frozen_input, run_stability, summarize_trials, payload_hash
+    root.mkdir()
+    payload, controls = frozen_input(baseline, dataset)
+    stable = root/'stable'
+    excluded = root/'excluded'
+    # Callback factories only; run_stability never constructs a provider in this fixture.
+    run_stability(payload, controls, stable, lambda: stable_judge, repeats=2)
+    excluded_judge.usage = dict(input_tokens=0, output_tokens=0, total_tokens=0)
+    run_stability(payload, controls, excluded, lambda: excluded_judge, repeats=2)
+    interrupted, corrupt = root/'interrupted', root/'corrupt'
+    for directory in (interrupted, corrupt):
+        shutil.copytree(stable, directory)
+    partial = json.loads((interrupted/'result.json').read_text(encoding='utf-8'))
+    for key in summarize_trials(payload, partial['trials']):
+        partial.pop(key, None)
+    partial.update(status='running', trials=partial['trials'][:1])
+    (interrupted/'result.json').write_text(json.dumps(partial), encoding='utf-8')
+    invalid = json.loads((corrupt/'result.json').read_text(encoding='utf-8'))
+    invalid['trials'][1]['number'] = 1
+    (corrupt/'result.json').write_text(json.dumps(invalid), encoding='utf-8')
+    directories = (stable, excluded, interrupted, corrupt)
+    before = {p:p.read_bytes() for directory in directories for p in directory.rglob('*') if p.is_file()}
+    receipts = []
+    for name, directory, code, status in (
+        ('saved_stable', stable, 0, 'passed'),
+        ('saved_excluded', excluded, 3, 'review_required'),
+        ('saved_interrupted', interrupted, 3, 'unknown'),
+        ('saved_corrupt', corrupt, 1, 'input_rejected')):
+        target = root/(name+'-view')
+        module('researchdesk.judge_stability', baseline, '--dataset', dataset, '--check-result',
+               directory/'result.json', '--output', target, expected=code)
+        if code == 1:
+            require(not target.exists(), 'Rejected saved records must not emit a gate.')
+        else:
+            gates = list(target.glob('*/gate.json'))
+            require(len(gates)==1, 'Expected exactly one saved-result gate.')
+            gate = json.loads(gates[0].read_text(encoding='utf-8'))
+            audit = json.loads(gates[0].with_name('audit.json').read_text(encoding='utf-8'))
+            require(gate['status']==status and gate['exit_code']==code and gate['api_requests']==0,
+                    'Installed saved-result check lost its status or zero-request boundary.')
+            require(gate['audit_content_sha256']==payload_hash(audit), 'Saved-result audit binding changed.')
+            require(gate['human_review']==gate['final_acceptance']=='pending' and gate['promotion']=='none',
+                    'Saved-result consistency must not promote human or task acceptance.')
+            if status == 'review_required':
+                require(audit['new_trial_factual_agreement']==1, 'Expected agreement despite historical drift.')
+            if status == 'unknown':
+                require(audit['valid_trials']==1 and audit['planned_trials']==2, 'Incomplete run was resumed.')
+        receipts.append(dict(case=name, gate='saved_stability_factuality', exit_code=code, status=status))
+        print(f'Saved stability smoke {name}: {status}; exit {code}', flush=True)
+    require({p:p.read_bytes() for directory in directories for p in directory.rglob('*') if p.is_file()}==before,
+            'Saved-result check modified source trial files.')
+    return dict(cases=receipts, source_files_unchanged=True, execution_mode='injected_offline',
+                model_requests=0, search_requests=0)
 
 
 def smoke(wheel, output):
@@ -288,7 +352,8 @@ def smoke(wheel, output):
                   mechanism_checks_passed=True, historical_summary_readonly=True,
                   evaluation_gate_process_matrix=True, standalone_body_limit_rejected=True,
                   evaluation_gate_sources_readonly=True, factuality_gate_process_matrix=True,
-                  factuality_gate_sources_readonly=True)
+                  factuality_gate_sources_readonly=True, saved_stability_process_matrix=True,
+                  saved_stability_sources_readonly=True)
     result = dict(version='wheel-smoke-v1', status='passed', checks=checks,
                   wheel=wheel.name, wheel_sha256=hashlib.sha256(wheel.read_bytes()).hexdigest(),
                   python=sys.version.split()[0], package_version=distribution.version,
@@ -299,7 +364,7 @@ def smoke(wheel, output):
     (output / 'summary.md').write_text('# Wheel 安装验收\n\n非 editable 安装，在源码目录之外运行。\n\n'
         + '\n'.join(f'- {name}: passed' for name in checks)
         + '\n\n| 离线样例 | 选择口径 | 退出码 | 状态 |\n|---|---|---:|---|\n'
-        + '\n'.join(f"| {row['case']} | {row['gate']} | {row['exit_code']} | {row['status']} |" for row in gates['cases'] + factuality_gates['cases'])
+        + '\n'.join(f"| {row['case']} | {row['gate']} | {row['exit_code']} | {row['status']} |" for row in gates['cases'] + factuality_gates['cases'] + factuality_gates['saved_stability']['cases'])
         + '\n\n固定资料、零模型/搜索调用；不代表研究质量验收。\n', encoding='utf-8')
     return result
 

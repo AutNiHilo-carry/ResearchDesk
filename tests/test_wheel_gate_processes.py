@@ -54,13 +54,21 @@ def test_subprocess_guard_rejects_network_before_running_a_module(tmp_path,snipp
     assert result.returncode!=0 and 'Network disabled' in result.stderr
 
 
-@pytest.mark.parametrize('target',['researchdesk.task_eval','researchdesk.evaluation_audit'])
+@pytest.mark.parametrize('target',['researchdesk.task_eval','researchdesk.evaluation_audit','researchdesk.judge_stability'])
 def test_gate_guard_refuses_credential_loading(tmp_path,target):
     module=smoke_module()
     prefix=module.OFFLINE_GUARD.split('sys.argv = [module]')[0]
     result=subprocess.run([sys.executable,'-I','-c',prefix+'\ndotenv.load_dotenv()',target],
                           cwd=tmp_path,capture_output=True,text=True,timeout=15)
     assert result.returncode!=0 and 'Credential loading disabled' in result.stderr
+
+
+def test_saved_stability_guard_refuses_model_construction(tmp_path):
+    module=smoke_module()
+    prefix=module.OFFLINE_GUARD.split('sys.argv = [module]')[0]
+    result=subprocess.run([sys.executable,'-I','-c',prefix+'\nresearchdesk.verification.ModelJudge()',
+                           'researchdesk.judge_stability'],cwd=tmp_path,capture_output=True,text=True,timeout=15)
+    assert result.returncode!=0 and 'Model construction disabled' in result.stderr
 
 
 def test_factuality_gate_exit_codes_survive_real_processes(tmp_path,monkeypatch):
@@ -80,7 +88,10 @@ def test_factuality_gate_exit_codes_survive_real_processes(tmp_path,monkeypatch)
         assert process.returncode==expected,(name,process.returncode,process.stdout,process.stderr)
         observed.append(process.returncode)
     result=module.factuality_gate_smoke(tmp_path/'factuality-matrix',child)
-    assert observed==[0,3,3]
+    assert observed==[0,3,3,0,3,3,1]
     assert [r['status'] for r in result['cases']]==['passed','review_required','unknown']
     assert result['fixture_model_rates']==dict(baseline=0,excluded=1)
     assert result['source_files_unchanged'] and result['model_requests']==result['search_requests']==0
+    saved=result['saved_stability']
+    assert [r['status'] for r in saved['cases']]==['passed','review_required','unknown','input_rejected']
+    assert saved['source_files_unchanged'] and saved['model_requests']==saved['search_requests']==0

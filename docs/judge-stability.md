@@ -66,4 +66,12 @@ python -m researchdesk.judge_stability runs/generation-contract-plans/5746f5fdbf
 
 该门槛仅证明本次保存记录的事实分类一致性，不认证真实HTTP请求、作者或模型后端快照，也不证明引用正确、报告质量、任务通过或人工审核完成；human_review 与 final_acceptance 始终pending，不自动晋升策略。
 
+### 安装包验收
+
+`scripts/smoke_wheel.py` 将此入口纳入非 editable wheel 验收：安装后在源码目录之外，通过独立进程执行四类固定记录。历史分类一致返回0／passed；两轮新分类相互一致但偏离历史返回3／review_required；仅保存一轮的中断记录返回3／unknown；重复轮次身份的损坏记录返回1，且不生成门槛文件。
+
+子进程禁用socket连接、DNS、dotenv加载及ModelJudge构建，并清除模型／搜索Key环境变量。验收核对审计哈希、人工验收pending、无策略晋升，以及原评测、资料和逐轮记录未变化。结果写入wheel验收产物的 `factuality_gates.saved_stability`，摘要逐项列出退出码；CI会保存安装包检查产物。
+
+这些记录由固定回调离线构造，测试退出边界和安装行为，不是真实模型实验、人工参考标签或研究质量证据；审计钩子也不等同于通用操作系统网络沙箱。
+
 已在禁用socket/DNS、dotenv加载及ModelJudge构建的独立进程中检查[真实v2结果](v2-formal-stability.md)：完整2/2轮且内部事实一致率1.0，但两轮均相对历史出现事实排除，正式入口返回3／review_required。附件位于本地 `runs/stability-direct-checks/decbcf00817142389785341fde835499/294da5dce6e847c5bd485f412ab1fbad/`；源评测与稳定性目录逐文件哈希不变，新增API请求0。此检查没有重做模型评分。
