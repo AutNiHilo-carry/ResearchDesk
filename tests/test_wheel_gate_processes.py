@@ -54,9 +54,33 @@ def test_subprocess_guard_rejects_network_before_running_a_module(tmp_path,snipp
     assert result.returncode!=0 and 'Network disabled' in result.stderr
 
 
-def test_task_evaluation_guard_refuses_credential_loading(tmp_path):
+@pytest.mark.parametrize('target',['researchdesk.task_eval','researchdesk.evaluation_audit'])
+def test_gate_guard_refuses_credential_loading(tmp_path,target):
     module=smoke_module()
     prefix=module.OFFLINE_GUARD.split('sys.argv = [module]')[0]
-    result=subprocess.run([sys.executable,'-I','-c',prefix+'\ndotenv.load_dotenv()','researchdesk.task_eval'],
+    result=subprocess.run([sys.executable,'-I','-c',prefix+'\ndotenv.load_dotenv()',target],
                           cwd=tmp_path,capture_output=True,text=True,timeout=15)
     assert result.returncode!=0 and 'Credential loading disabled' in result.stderr
+
+
+def test_factuality_gate_exit_codes_survive_real_processes(tmp_path,monkeypatch):
+    module=smoke_module()
+    import socket
+    monkeypatch.setattr(socket,'create_connection',lambda *a,**k:pytest.fail('No parent network calls'))
+    import dotenv
+    monkeypatch.setattr(dotenv,'load_dotenv',lambda *a,**k:pytest.fail('No parent credential loading'))
+    environment=os.environ.copy()
+    for key in ('PYTHONPATH','PYTHONHOME','DEEPSEEK_API_KEY','TAVILY_API_KEY'):
+        environment.pop(key,None)
+    environment['PYTHONUTF8']='1'
+    observed=[]
+    def child(name,*args,expected=0):
+        process=subprocess.run([sys.executable,'-I','-c',module.OFFLINE_GUARD,name,*map(str,args)],
+                               cwd=tmp_path,env=environment,capture_output=True,text=True,timeout=90)
+        assert process.returncode==expected,(name,process.returncode,process.stdout,process.stderr)
+        observed.append(process.returncode)
+    result=module.factuality_gate_smoke(tmp_path/'factuality-matrix',child)
+    assert observed==[0,3,3]
+    assert [r['status'] for r in result['cases']]==['passed','review_required','unknown']
+    assert result['fixture_model_rates']==dict(baseline=0,excluded=1)
+    assert result['source_files_unchanged'] and result['model_requests']==result['search_requests']==0

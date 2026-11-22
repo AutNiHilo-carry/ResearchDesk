@@ -1,5 +1,7 @@
 """Run with the wheel-installed interpreter; source checkout and editable installs are rejected."""
 import argparse
+import copy
+import shutil
 import hashlib
 import importlib.metadata
 import json
@@ -26,7 +28,7 @@ def guard(event, args):
         raise RuntimeError('Network disabled during wheel smoke')
 sys.addaudithook(guard)
 module = sys.argv[1]
-if module == 'researchdesk.task_eval':
+if module in {'researchdesk.task_eval', 'researchdesk.evaluation_audit'}:
     import dotenv
     def no_credentials(*args, **kwargs):
         raise RuntimeError('Credential loading disabled during offline gate smoke')
@@ -125,6 +127,106 @@ def gate_smoke(root, module):
                 body_count=count['counted_chars'],model_requests=0,search_requests=0)
 
 
+def factuality_gate_smoke(root, module):
+    """Installed-process checks using injected labels, never real research judgments."""
+    from researchdesk.ledger import Ledger
+    from researchdesk.review import fingerprint
+    from researchdesk.task_eval import (evaluate_batch, load_taskset, quality_metrics, task_success,
+                                        assessment, application_assessment)
+    from researchdesk.task_grading import TASK_PROMPT
+    from researchdesk.verification import assess, digest, SYSTEM_PROMPT_V2
+    root.mkdir()
+    dataset = root/'dataset.json'
+    notes = root/'notes.md'
+    notes.write_text('Fixture fact.', encoding='utf-8')
+    dataset.write_text(json.dumps(dict(version='research-tasks-v1',
+        label_status='injected_offline_not_model_or_human',
+        thresholds=dict(citation_precision=0.9, evidence_coverage=0.6),
+        tasks=[dict(id='case', question='State the fixture fact.', documents=['notes.md'],
+                    criteria=[dict(id='fact', description='State the documented fact.')])])), encoding='utf-8')
+    originals = {p:p.read_bytes() for p in (dataset, notes)}
+    data, tasks, documents = load_taskset(dataset)
+    frozen = []
+    def runner(task, paths, directory, timeout):
+        ledger = Ledger(directory/'research'/('a'*32))
+        try:
+            source = ledger.add_source('Fixture', str(paths[0]), 'Fixture fact.', 'local')
+            evidence = ledger.add_evidence('Fixture fact.', source['id'], 'Fixture fact.')
+            ledger.save_report(f"Fixture fact.[{evidence['id']}]\nUncited fixture assertion.")
+            (ledger.directory/'run.json').write_text(json.dumps(dict(status='completed',mode='fixture',model='fixture')),encoding='utf-8')
+        finally:
+            ledger.store.close()
+        return dict(task_id=task['id'],generation_status='completed',run_directory=str(ledger.directory),
+                    model='fixture',generation_metrics=dict(provider_requests=0,total_tokens=0,token_usage_complete=True))
+    def rubric(payload):
+        return dict(tasks=[dict(task_id='case',criteria=[dict(criterion_id='fact',passed=True,
+            report_quote='Fixture fact.',reason='Injected offline reference')])])
+    rubric.prompt_version = 'research-task-rubric-v1'
+    rubric.prompt_sha256 = digest(TASK_PROMPT)
+    rubric.usage = dict(input_tokens=0,output_tokens=0,total_tokens=0)
+    def judge(payload):
+        frozen.append(copy.deepcopy(payload))
+        return dict(units=[dict(unit_id=r['unit_id'],factual=True,reason='Injected offline reference',
+            links=[dict(evidence_id=eid,verdict='supported',reason='Injected offline reference') for eid in r['citations']])
+            for r in payload['units']])
+    judge.prompt_version = 'report-quote-v2'
+    judge.prompt_sha256 = digest(SYSTEM_PROMPT_V2)
+    judge.usage = dict(input_tokens=0,output_tokens=0,total_tokens=0)
+    baseline = root/'baseline'
+    initial = evaluate_batch(data,tasks,documents,baseline,runner=runner,model_name='fixture',
+                             task_judge=rubric,evidence_judge=judge)
+    require(initial['task_success_rate']==0,'Uncited fixture must fail the initial model gate.')
+    stable,excluded,missing = [root/name for name in ('stable','excluded','missing')]
+    for destination in (stable,excluded,missing):
+        shutil.copytree(baseline,destination)
+    original_quality = json.loads((baseline/'citation-quality.json').read_text(encoding='utf-8'))
+    def relabel(_):
+        return dict(units=[dict(unit_id=r['unit_id'],factual=bool(r['citations']),reason='Injected exclusion',
+            links=[dict(evidence_id=eid,verdict='supported',reason='Injected exclusion') for eid in r['citations']])
+            for r in frozen[0]['units']])
+    relabel.prompt_version, relabel.prompt_sha256 = judge.prompt_version,judge.prompt_sha256
+    quality = assess(frozen[0],relabel)
+    changed = copy.deepcopy(initial)
+    record = changed['tasks'][0]
+    record['quality'] = quality_metrics(quality['units'])
+    record['success'] = task_success(record,record['rubric'],record['quality'],changed['thresholds'])
+    record['assessment'] = assessment(record,changed['status'])
+    record['application_assessment'] = application_assessment(record,changed['status'])
+    changed['task_success_rate'] = int(record['success'])
+    require(changed['task_success_rate']==1,'Exclusion must raise fixture model score without editing prose.')
+    require(len(original_quality['units'])==len(quality['units'])==2,'Expected the whole two-line fixture.')
+    (excluded/'result.json').write_text(json.dumps(changed),encoding='utf-8')
+    (excluded/'citation-quality.json').write_text(json.dumps(quality),encoding='utf-8')
+    (missing/'citation-quality.json').unlink()
+    def snapshot(directory):
+        return {str(p.relative_to(directory)):hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in directory.rglob('*') if p.is_file()}
+    source_dirs = (baseline,stable,excluded,missing)
+    before = {p:snapshot(p) for p in source_dirs}
+    receipts = []
+    for name,directory,code,status in (
+        ('stable_factuality',stable,0,'passed'),
+        ('excluded_factuality',excluded,3,'review_required'),
+        ('missing_factuality',missing,3,'unknown')):
+        target = root/(name+'-view')
+        module('researchdesk.evaluation_audit',baseline,directory,'--output',target,'--gate','factuality',expected=code)
+        verdict = json.loads((target/'gate.json').read_text(encoding='utf-8'))
+        audit = json.loads((target/'result.json').read_text(encoding='utf-8'))
+        require(verdict['gate']=='factuality' and verdict['status']==status and verdict['exit_code']==code,
+                'Installed factuality gate lost its status/exit boundary.')
+        require(verdict['audit_content_sha256']==fingerprint(audit),'Installed verdict lost audit binding.')
+        require(verdict['human_review']==verdict['final_acceptance']=='pending' and verdict['promotion']=='none',
+                'Factuality consistency cannot promote task or human acceptance.')
+        if status=='review_required':
+            require(audit['factuality_audit']['coverage_increase_task_ids']==['case'],'Exclusion-driven gain was not identified.')
+        receipts.append(dict(case=name,gate='factuality',exit_code=code,status=status))
+        print(f'Factuality gate smoke {name}: {status}; exit {code}',flush=True)
+    require(all(snapshot(p)==before[p] for p in source_dirs),'Factuality gate modified fixture inputs.')
+    require(all(p.read_bytes()==raw for p,raw in originals.items()),'Factuality gate changed its dataset.')
+    return dict(execution_mode='injected_offline',cases=receipts,source_files_unchanged=True,
+                fixture_model_rates=dict(baseline=0,excluded=1),model_requests=0,search_requests=0)
+
+
 def smoke(wheel, output):
     checkout = Path(__file__).resolve().parents[1]
     output = output.resolve()
@@ -180,22 +282,24 @@ def smoke(wheel, output):
     require('| invalid | unknown |' in summary and 'Final acceptance: pending' in summary,
             'Installed summary lost assessment boundaries.')
     gates=gate_smoke(output/'evaluation-gates',module)
+    factuality_gates=factuality_gate_smoke(output/'factuality-gates',module)
     checks = dict(non_editable_wheel_import=True, installed_code_matches_wheel=True,
                   console_entrypoint_help=True, isolated_module_help=True,
                   mechanism_checks_passed=True, historical_summary_readonly=True,
                   evaluation_gate_process_matrix=True, standalone_body_limit_rejected=True,
-                  evaluation_gate_sources_readonly=True)
+                  evaluation_gate_sources_readonly=True, factuality_gate_process_matrix=True,
+                  factuality_gate_sources_readonly=True)
     result = dict(version='wheel-smoke-v1', status='passed', checks=checks,
                   wheel=wheel.name, wheel_sha256=hashlib.sha256(wheel.read_bytes()).hexdigest(),
                   python=sys.version.split()[0], package_version=distribution.version,
                   checked_python_files=checked_files, model_requests=0, search_requests=0,
-                  evaluation_gates=gates,
+                  evaluation_gates=gates, factuality_gates=factuality_gates,
                   scope='installed wheel, fixed fixtures; not live research quality or universal platform support')
     (output / 'result.json').write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
     (output / 'summary.md').write_text('# Wheel 安装验收\n\n非 editable 安装，在源码目录之外运行。\n\n'
         + '\n'.join(f'- {name}: passed' for name in checks)
         + '\n\n| 离线样例 | 选择口径 | 退出码 | 状态 |\n|---|---|---:|---|\n'
-        + '\n'.join(f"| {row['case']} | {row['gate']} | {row['exit_code']} | {row['status']} |" for row in gates['cases'])
+        + '\n'.join(f"| {row['case']} | {row['gate']} | {row['exit_code']} | {row['status']} |" for row in gates['cases'] + factuality_gates['cases'])
         + '\n\n固定资料、零模型/搜索调用；不代表研究质量验收。\n', encoding='utf-8')
     return result
 

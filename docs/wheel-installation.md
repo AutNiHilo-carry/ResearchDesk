@@ -15,10 +15,13 @@
 - 历史评分摘要能离线显示 invalid/unknown 和最终验收 pending，原 JSON 字节不变。
 - 安装后的真实验收 CLI 子进程矩阵：短稿应用通过返回0、模型通过但超长返回3、同一超长稿显式模型口径返回0、旧批次缺检查返回3/unknown、被改动的长度缓存返回1且无验收结论。
 - 安装后的独立正文检查 CLI 能拒绝213/200的固定超长正文；逐文件核对所有评测输入未变。
+- 安装后的事实分类门槛 CLI 子进程矩阵：同文同输入分类不变返回0／passed，排除未覆盖事实而提高评分返回3／review_required，缺失评分返回3／unknown；校验 gate.json 与审计内容哈希绑定，人工验收保持pending。
 
 机制和摘要模块以 Python `-I` 启动，忽略 PYTHONPATH/当前目录；Python audit hook 拒绝这些子进程中的 socket connect/DNS 事件。console help 在清理 PYTHONPATH/PYTHONHOME 的环境中运行。此检查不覆盖所有系统网络机制，不是操作系统沙箱；wheel 构建和依赖安装仍需联网下载。
 
-验收矩阵同样使用 `-I`，每次启动独立进程，task_eval 子进程还将 dotenv 加载函数替换为明确拒绝。样例由注入的 runner、rubric 和证据标签创建，故意让模型口径全通过以暴露长度拦截；不会把 fixture 的 passed 当作模型或人工质量结论。原始批次保留，应用状态不信任缓存徽标。矩阵及退出码回执写入 smoke result.json，使用已有 CI artifact 白名单归档。
+验收矩阵同样使用 `-I`，每次启动独立进程，task_eval 与 evaluation_audit 子进程还将 dotenv 加载函数替换为明确拒绝。样例由注入的 runner、rubric 和证据标签创建：原有矩阵故意让模型口径全通过以暴露长度拦截；事实分类矩阵则保留完全相同的两行正文，将未覆盖行排除，使注入评分的任务通过率从0变成1，确认新门槛仍拦截。不会把 fixture 的 passed 当作真实模型或人工质量结论。
+
+两组矩阵逐文件核对评测目录和数据集未变。事实分类回执另存于 smoke result.json 的 factuality_gates，标记 execution_mode=injected_offline、model_requests=0、search_requests=0，同时写入摘要。原有 evaluation_gates 字段及检查保留，继续使用已有 CI artifact 白名单归档；不上传fixture原始目录。
 
 ## 本地复现（PowerShell）
 
