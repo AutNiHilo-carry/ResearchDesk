@@ -78,7 +78,25 @@ python -m researchdesk.judge_stability runs/generation-contract-plans/5746f5fdbf
 
 已用真实v2保存记录在禁用网络、凭证加载与模型构建的进程中生成材料：本地 `runs/stability-direct-checks/6e711131be6747aa917c57552e6876f7/85855f2d2d5545dd92228f15297cbc26/` 包含2题共17行，人工字段全部留空；门槛仍为review_required／3。源评测与稳定性目录逐文件哈希不变，新增API请求0。这份新材料不替代此前8组候选近义句复核包，两者范围与格式不同。
 
-### 安装包验收
+### 专用人工意见记录入口
+
+填写后的稳定性复核表使用专用命令，仍不能交给常规逐报告的 `researchdesk.review import`：
+
+```powershell
+python -m researchdesk.stability_review <原评测目录> --dataset <原任务集.json> --source <稳定性结果/result.json> --bundle <包含review-context.json的目录> --review <另存的填写表.json> --output <新的意见记录目录>
+```
+
+保留version、context_sha256与每行unit_id，填写reviewer及含时区的reviewed_at。每行factual只能为true、false或null；有确定标签时必须写reason。atomic_claims用于拆分表述，列表中的字符串不能只含空白。无法判断可保留null并说明原因，不能用false代替未知。所有评分行都必须出现一次，未审核行保留空值，不能删掉；status可以保留模板的pending，由程序计算实际完成度，若手填partial／complete则必须与实际一致。
+
+该命令重新运行零API保存结果核验，从原评测、稳定性记录和任务集重建当前复核包，再核对审计、门槛、完整上下文、空模板与阅读文件。即使同时修改上下文和填写表里的哈希，也不能绕过原记录校验。写出前再次检查实际使用的来源、复核包和提交文件，观察到变化即拒绝；这些多文件检查不是对活跃写入目录的原子快照，应使用已完成／停止写入的记录。
+
+合法意见另存submitted-review.json、result.json和summary.md，不覆盖既有输出或任何原记录。全部行都有确定标签时返回0／complete；存在null时返回3／partial，保留未知数与原意见；身份空白、时间无时区、字段类型错误、缺行、重复行、来源变化或绑定不符返回1，不写接受结果。返回0仅表示意见格式与绑定完整，不表示意见正确或研究通过。空白模板没有审核者和时间，不能当成已完成意见导入。
+
+审核者身份为自报、未经认证；此入口记录事实性意见，不计算准确率，不比较模型优劣，不评判引用支持关系，也不授予Task Success或修改原门槛。accuracy保持null，final_acceptance保持pending，promotion保持none。本轮仅用明确标注的合成测试意见验证命令，没有填写或导入真实人工标签。
+
+wheel安装验收另覆盖四种合成提交：完整记录返回0，部分未知返回3，空白模板和错误上下文绑定均返回1；子进程禁用网络、dotenv及模型构建，原复核包保持不变。
+
+### 安装包中的保存结果检查
 
 `scripts/smoke_wheel.py` 将此入口纳入非 editable wheel 验收：安装后在源码目录之外，通过独立进程执行四类固定记录。历史分类一致返回0／passed；两轮新分类相互一致但偏离历史返回3／review_required；仅保存一轮的中断记录返回3／unknown；重复轮次身份的损坏记录返回1，且不生成门槛文件。
 

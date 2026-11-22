@@ -28,12 +28,12 @@ def guard(event, args):
         raise RuntimeError('Network disabled during wheel smoke')
 sys.addaudithook(guard)
 module = sys.argv[1]
-if module in {'researchdesk.task_eval', 'researchdesk.evaluation_audit', 'researchdesk.judge_stability'}:
+if module in {'researchdesk.task_eval', 'researchdesk.evaluation_audit', 'researchdesk.judge_stability', 'researchdesk.stability_review'}:
     import dotenv
     def no_credentials(*args, **kwargs):
         raise RuntimeError('Credential loading disabled during offline gate smoke')
     dotenv.load_dotenv = no_credentials
-if module == 'researchdesk.judge_stability':
+if module in {'researchdesk.judge_stability', 'researchdesk.stability_review'}:
     import researchdesk.verification
     def no_model(*args, **kwargs):
         raise RuntimeError('Model construction disabled during offline stability smoke')
@@ -295,9 +295,53 @@ def saved_stability_smoke(root, module, baseline, dataset, stable_judge, exclude
                 require(audit['valid_trials']==1 and audit['planned_trials']==2, 'Incomplete run was resumed.')
         receipts.append(dict(case=name, gate='saved_stability_factuality', exit_code=code, status=status))
         print(f'Saved stability smoke {name}: {status}; exit {code}', flush=True)
+    bundle = next((root/'saved_stable-view').glob('*/gate.json')).parent
+    opinions = review_import_smoke(root/'opinion-import', module, baseline, dataset, stable/'result.json', bundle)
     require({p:p.read_bytes() for directory in directories for p in directory.rglob('*') if p.is_file()}==before,
             'Saved-result check modified source trial files.')
-    return dict(cases=receipts, source_files_unchanged=True, execution_mode='injected_offline',
+    return dict(cases=receipts, opinion_import=opinions, source_files_unchanged=True, execution_mode='injected_offline',
+                model_requests=0, search_requests=0)
+
+
+def review_import_smoke(root, module, baseline, dataset, source, bundle):
+    """Synthetic submissions only; no independent human labels are supplied by CI."""
+    root.mkdir()
+    before = {p:p.read_bytes() for p in bundle.rglob('*') if p.is_file()}
+    template = json.loads((bundle/'review-template.json').read_text(encoding='utf-8'))
+    complete = copy.deepcopy(template)
+    complete.update(reviewer='Synthetic test submitter; not real human review', reviewed_at='2026-11-22T12:00:00+08:00')
+    for row in complete['units']:
+        row.update(factual=True, atomic_claims=['Synthetic claim'], reason='Synthetic test opinion')
+    partial = copy.deepcopy(complete)
+    partial['units'][0].update(factual=None, atomic_claims=[], reason='Insufficient material; synthetic test')
+    unbound = copy.deepcopy(complete)
+    unbound['context_sha256'] = '0'*64
+    receipts = []
+    for name, form, code, status in (
+        ('opinion_complete', complete, 0, 'complete'),
+        ('opinion_partial', partial, 3, 'partial'),
+        ('opinion_blank', template, 1, 'input_rejected'),
+        ('opinion_unbound', unbound, 1, 'input_rejected')):
+        review = root/(name+'.json')
+        review.write_text(json.dumps(form), encoding='utf-8')
+        output = root/(name+'-record')
+        module('researchdesk.stability_review', baseline, '--dataset', dataset, '--source', source,
+               '--bundle', bundle, '--review', review, '--output', output, expected=code)
+        if code == 1:
+            require(not output.exists(), 'Rejected opinions must not emit an accepted record.')
+        else:
+            result = json.loads((output/'result.json').read_text(encoding='utf-8'))
+            require(result['completeness']==status and result['exit_code']==code and result['api_requests']==0,
+                    'Installed opinion import lost its completion or request boundary.')
+            require(result['unknown_units']==int(code==3) and result['accuracy'] is None
+                    and result['promotion']=='none' and result['final_acceptance']=='pending'
+                    and result['identity']=='self_declared_not_authenticated',
+                    'Opinion completeness cannot promote research quality or authenticate identity.')
+            require((output/'submitted-review.json').read_bytes()==review.read_bytes(), 'Submitted opinion changed.')
+        receipts.append(dict(case=name, gate='opinion_recording_only', exit_code=code, status=status))
+        print(f'Stability opinion smoke {name}: {status}; exit {code}', flush=True)
+    require({p:p.read_bytes() for p in bundle.rglob('*') if p.is_file()}==before, 'Opinion import modified its source bundle.')
+    return dict(cases=receipts, source_files_unchanged=True, label_status='synthetic_not_independent_human',
                 model_requests=0, search_requests=0)
 
 
@@ -363,7 +407,7 @@ def smoke(wheel, output):
                   evaluation_gate_process_matrix=True, standalone_body_limit_rejected=True,
                   evaluation_gate_sources_readonly=True, factuality_gate_process_matrix=True,
                   factuality_gate_sources_readonly=True, saved_stability_process_matrix=True,
-                  saved_stability_sources_readonly=True)
+                  saved_stability_sources_readonly=True, stability_opinion_process_matrix=True)
     result = dict(version='wheel-smoke-v1', status='passed', checks=checks,
                   wheel=wheel.name, wheel_sha256=hashlib.sha256(wheel.read_bytes()).hexdigest(),
                   python=sys.version.split()[0], package_version=distribution.version,
@@ -374,7 +418,7 @@ def smoke(wheel, output):
     (output / 'summary.md').write_text('# Wheel 安装验收\n\n非 editable 安装，在源码目录之外运行。\n\n'
         + '\n'.join(f'- {name}: passed' for name in checks)
         + '\n\n| 离线样例 | 选择口径 | 退出码 | 状态 |\n|---|---|---:|---|\n'
-        + '\n'.join(f"| {row['case']} | {row['gate']} | {row['exit_code']} | {row['status']} |" for row in gates['cases'] + factuality_gates['cases'] + factuality_gates['saved_stability']['cases'])
+        + '\n'.join(f"| {row['case']} | {row['gate']} | {row['exit_code']} | {row['status']} |" for row in gates['cases'] + factuality_gates['cases'] + factuality_gates['saved_stability']['cases'] + factuality_gates['saved_stability']['opinion_import']['cases'])
         + '\n\n固定资料、零模型/搜索调用；不代表研究质量验收。\n', encoding='utf-8')
     return result
 
