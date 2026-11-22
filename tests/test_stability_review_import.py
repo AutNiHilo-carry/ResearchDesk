@@ -110,3 +110,31 @@ def test_review_drift_before_write_is_rejected(completed_batch,tmp_path,monkeypa
     with pytest.raises(ValueError):
         stability_review.record_review(evaluation,dataset,source,bundle,review,output)
     assert not output.exists()
+
+
+@pytest.mark.parametrize('failed_file',['submitted-review.json','summary.md','result.json'])
+def test_publish_failure_never_leaves_an_accepted_result(completed_batch,tmp_path,monkeypatch,failed_file):
+    """Fail real atomic-file publication, including after earlier files were saved."""
+    import os
+    evaluation,dataset,source,bundle,review,_=fixture(completed_batch,tmp_path)
+    before=snapshot(evaluation,source.parent,bundle)
+    raw_review=review.read_bytes()
+    output=tmp_path/'interrupted-opinion'
+    replace=os.replace
+    def interrupted(source_path,target_path):
+        if Path(target_path)==output/failed_file:
+            raise OSError('Injected atomic publication failure')
+        return replace(source_path,target_path)
+    monkeypatch.setattr(os,'replace',interrupted)
+    monkeypatch.setattr(sys,'argv',['stability_review',str(evaluation),'--dataset',str(dataset),
+        '--source',str(source),'--bundle',str(bundle),'--review',str(review),'--output',str(output)])
+    assert stability_review.main()==1
+    assert not (output/'result.json').exists()
+    assert snapshot(evaluation,source.parent,bundle)==before and review.read_bytes()==raw_review
+    leftovers=snapshot(output)
+    with pytest.raises(ValueError):
+        stability_review.record_review(evaluation,dataset,source,bundle,review,output)
+    assert snapshot(output)==leftovers
+    monkeypatch.setattr(os,'replace',replace)
+    result=stability_review.record_review(evaluation,dataset,source,bundle,review,tmp_path/'fresh-opinion')
+    assert result['completeness']=='complete' and result['exit_code']==0

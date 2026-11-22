@@ -85,11 +85,13 @@ def record_review(evaluation, dataset, source, bundle, review, output):
         scope='recorded_factuality_opinions_not_independent_gold_or_task_acceptance')
     output.mkdir(parents=True, exist_ok=False)
     atomic_text(output/'submitted-review.json', submitted.decode('utf-8'))
-    atomic_text(output/'result.json', json.dumps(result, ensure_ascii=False, indent=2))
     atomic_text(output/'summary.md', '# Stability factuality review recorded\n\n'
         + f'Completeness: {completeness}; known: {known}/{len(ids)}; unknown: {len(ids)-known}.\n\n'
         + 'Identity is self-declared. Zero API requests. Historical scores unchanged.\n'
         + 'Unknown labels remain null. No accuracy, task acceptance or policy promotion assigned.\n')
+    # This canonical result is the acceptance marker, published only after all attachments.
+    # A failed write may leave diagnostic files; it must never leave an accepted result.
+    atomic_text(output/'result.json', json.dumps(result, ensure_ascii=False, indent=2))
     return result
 
 
