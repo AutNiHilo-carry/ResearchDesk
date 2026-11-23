@@ -5,6 +5,7 @@ from langchain_core.tools import tool
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from .policy import ToolExecutor, ToolFailure, ToolSpec
 from .search_context import bind_policy,render_search_sources
+from .draft_inspection import bind_policy as bind_inspection, inspect as inspect_draft
 
 
 class Arguments(BaseModel):
@@ -29,6 +30,10 @@ class ReadArgs(Arguments):
 class EvidenceArgs(ReadArgs):
     claim: str = Field(min_length=1, max_length=4000)
     snippet: str = Field(min_length=1, max_length=24000)
+
+
+class DraftArgs(Arguments):
+    report: str = Field(min_length=1,max_length=12000)
 
 
 class SearchHit(BaseModel):
@@ -73,11 +78,22 @@ class ResearchTools:
     def __init__(self, ledger, api_key, limits=None, allowed_tools=None, **executor_options):
         self.ledger, self.api_key = ledger, api_key
         self.search_context_policy = bind_policy(ledger)
-        self.executor = ToolExecutor(ledger.directory, {
+        self.inspection_policy = bind_inspection(ledger)
+        specs = {
             "search_sources": ToolSpec(SearchArgs, self.search, read_only=True, cacheable=True),
             "read_source": ToolSpec(ReadArgs, self.read, read_only=True, cacheable=True),
             "record_evidence": ToolSpec(EvidenceArgs, self.record, read_only=False),
-        }, limits, allowed_tools, store=ledger.store, **executor_options)
+        }
+        if self.inspection_policy is not None:
+            specs['inspect_report']=ToolSpec(DraftArgs,self.inspect_report,read_only=True,cacheable=False)
+        self.executor = ToolExecutor(ledger.directory,specs, limits, allowed_tools, store=ledger.store, **executor_options)
+
+    def inspect_report(self,report):
+        spec=bind_inspection(self.ledger)
+        try:
+            return inspect_draft(report,self.ledger.evidence,self.ledger.sources,spec['max_chars'])
+        except ValueError:
+            raise ToolFailure('invalid_draft','Draft format or feedback size is invalid; no semantic judgment was made.') from None
 
     def request(self, endpoint, payload):
         if not self.api_key:
@@ -152,5 +168,10 @@ def build_tools(ledger, api_key, *, runtime=None):
         return runtime.executor.execute("record_evidence", {
             "claim": claim, "source_id": source_id, "snippet": snippet})
 
-    return [search_sources, read_source, record_evidence]
+    @tool
+    def inspect_report(report: str) -> dict:
+        """Inspect complete draft length and show cited quotes. Never proves support or saves a report."""
+        return runtime.executor.execute('inspect_report',{'report':report})
+
+    return [search_sources, read_source, record_evidence]+([inspect_report] if runtime.inspection_policy is not None else [])
 

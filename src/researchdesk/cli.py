@@ -15,6 +15,7 @@ from .context_policy import prepare_input, verify_saved_input
 from .model_budget import ModelBudgetExceeded, VERSION as MODEL_POLICY_VERSION
 from .report_policy import policy_spec
 from .search_context import policy_spec as search_context_spec,verify_completed_policy
+from .draft_inspection import policy_spec as draft_inspection_spec, verify_completed_policy as verify_completed_inspection
 
 POLICY_OPTIONS = {"max_calls": "max_tool_calls", "max_provider_requests": "max_provider_requests",
                   "timeout_seconds": "tool_timeout", "max_retries": "tool_retries",
@@ -41,6 +42,7 @@ def main(argv=None, *, model_name=None):
     parser.add_argument("--local-only", action="store_true", help="allow only imported documents and evidence tools")
     parser.add_argument("--context-mode", choices=["full", "catalog"], help="imported source presentation (default: full)")
     parser.add_argument("--report-policy", choices=["v1", "v2"], help="writing contract (default: unchanged v1)")
+    parser.add_argument('--draft-inspection-limit',type=int,help='Opt-in inspect_report feedback limit; no semantic acceptance')
     parser.add_argument('--search-context',choices=['full','preview'],help='search tool response presentation; default full')
     parser.add_argument("--output", type=Path, default=Path("runs"))
     parser.add_argument("--max-tool-calls", type=int)
@@ -52,6 +54,11 @@ def main(argv=None, *, model_name=None):
     args = parser.parse_args(argv)
     if args.max_model_calls is not None and not 0 <= args.max_model_calls <= 1000:
         parser.error("--max-model-calls must be 0..1000")
+    if args.draft_inspection_limit is not None:
+        try: draft_inspection_spec(args.draft_inspection_limit)
+        except ValueError: parser.error('--draft-inspection-limit must be 1..100000')
+        if args.resume or args.demo:
+            parser.error('Draft inspection is only configured on new live runs.')
     load_dotenv()
     if args.doctor:
         present = {key: bool(os.getenv(key, "").strip()) for key in ("DEEPSEEK_API_KEY", "TAVILY_API_KEY")}
@@ -92,6 +99,7 @@ def main(argv=None, *, model_name=None):
                 raise RecoveryError("This legacy/demo run cannot be resumed.")
             if metadata.get("status") == "completed" and (directory / "report.md").is_file():
                 verify_completed_policy(directory)
+                verify_completed_inspection(directory)
                 print(f"Report: {directory / 'report.md'} (already completed)")
                 return 0
             if not metadata.get("prepared"):
@@ -128,6 +136,10 @@ def main(argv=None, *, model_name=None):
             if not args.demo:
                 metadata["report_policy"] = policy_spec(args.report_policy or "v1")
                 metadata['search_context_policy'] = search_context_spec(args.search_context or 'full')
+            if args.draft_inspection_limit is not None:
+                metadata['draft_inspection_policy']=draft_inspection_spec(args.draft_inspection_limit)
+                if metadata['allowed_tools'] is not None:
+                    metadata['allowed_tools'].append('inspect_report')
             atomic_text(directory / "run.json", json.dumps(metadata, ensure_ascii=False, indent=2))
             documents = []
             for path in args.document:

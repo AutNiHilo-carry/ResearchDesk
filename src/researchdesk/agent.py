@@ -9,6 +9,8 @@ from .tools import ResearchTools, build_tools
 from .model_budget import BudgetCallbacks, model_budget_for
 from .report_policy import bound_prompt
 from .search_context import PREVIEW_HINT
+from .draft_inspection import HINT as DRAFT_HINT
+from .report_constraints import counting_instruction
 
 PROMPT = """你是 ResearchDesk 的 Lead Research Agent。独立完成研究，不委派子 Agent。
 先用 write_todos 制定简短计划，再搜索、阅读和记录证据，最后直接输出 Markdown 报告。
@@ -38,7 +40,8 @@ def build_agent(ledger, limits=None, *, checkpointer=None, model_name=None, allo
     model.callbacks = [*(model.callbacks or []), BudgetCallbacks(ledger, model_budget)]
     runtime = ResearchTools(ledger, os.getenv("TAVILY_API_KEY", ""), limits=limits,
                             allowed_tools=allowed_tools)
-    visible = (APPLICATION_TOOLS if allowed_tools is None else frozenset(allowed_tools) & APPLICATION_TOOLS) | {"write_todos"}
+    application_tools=APPLICATION_TOOLS | ({'inspect_report'} if runtime.inspection_policy is not None else set())
+    visible = (application_tools if allowed_tools is None else frozenset(allowed_tools) & application_tools) | {"write_todos"}
 
     @wrap_model_call
     def model_control(request, handler):
@@ -51,7 +54,7 @@ def build_agent(ledger, limits=None, *, checkpointer=None, model_name=None, allo
         if name == "write_todos":
             # Framework-owned in-memory planner; exempt from application tool budget.
             return handler(request)
-        if name in APPLICATION_TOOLS:
+        if name in application_tools:
             result = runtime.executor.execute(name, request.tool_call["args"],
                                               operation_id=request.tool_call["id"])
         else:
@@ -64,6 +67,8 @@ def build_agent(ledger, limits=None, *, checkpointer=None, model_name=None, allo
         prompt += "\n本次为本地资料限定模式。只使用 Imported sources 和 read_source，禁止外部检索；证据不足就保留结论。"
     if runtime.search_context_policy['mode']=='preview':
         prompt += '\n'+PREVIEW_HINT
+    if runtime.inspection_policy is not None and 'inspect_report' in visible:
+        prompt += '\n'+DRAFT_HINT+'\n'+counting_instruction(runtime.inspection_policy['max_chars'])
     prompt = bound_prompt(ledger, prompt, "generation")
     return create_deep_agent(
         model=model,

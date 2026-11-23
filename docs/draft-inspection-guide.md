@@ -1,0 +1,51 @@
+# 生成中的草稿检查工具（显式候选）
+
+新增inspect_report(report)，让Lead Agent在最终回复前获得确定性正文计数和逐行引用／摘录对照。**默认关闭；本轮仅离线机制验证，尚未证明能改善真实报告。** 不改写作提示v1/v2、评分器、引用门槛或最终验收策略，不生成新的模型成绩。
+
+## 启用
+
+新建live运行时显式设置：
+
+```powershell
+python -m researchdesk "研究问题" --document <资料.md> --local-only --report-policy v2 --draft-inspection-limit 200 --max-model-calls 5 --max-tool-calls 10 --max-provider-requests 0
+```
+
+该命令会调用配置的模型，示例不是本轮真实实验；5次模型调用是这个运行的额度，不是金额／Token上限。使用相同模型和预算做启用／不启用对照，才能评估效果。本轮没有执行该命令、追加修订或补旧任务预算。
+
+工具参数只有完整正文report，上限12000字符，不允许模型通过额外max_chars参数改掉应用冻结的限额。只对新live运行开放，不能给demo或resume替换参数。local-only运行仍只开放read_source、record_evidence，并在显式启用时额外允许inspect_report；search_sources仍不可见。其他权限约束继续生效，工具未获准时不追加可调用它的提示。
+
+启用时在run.json保存版本、max_chars和指令hash，SQLite持久化同一绑定；有效生成提示也被现有report_policy机制绑定。模型／工具调用发生后，不允许给原本未启用的运行补开此策略。恢复使用原绑定，移除策略、替换限额或指令hash都会拒绝，已完成运行的快捷恢复也检查绑定。默认关闭不为历史运行补造记录，不改变原三个应用工具或原提示。
+
+## 工具反馈
+
+- body_constraints：复用body-length-v1，返回精确计数、正文hash、上限及passed／failed／invalid。忽略空白和规范Evidence引用，其他内容计入，不截断或删句。
+- units与evidence：保留逐行原文和引用清单，并列逐条原摘录、location及现有完整性检查结果。没有引用的混合句也会保留，不自动判定factual。
+- citation_structure：至少一个引用且所有引用完整性有效时passed；缺引用、未知ID或摘录／来源篡改为failed。代码围栏、无可检查正文、畸形格式或过大反馈被拒绝，不静默省略。
+- semantic_support与business_requirements始终not_assessed，report_saved=false。引用存在不等于支持整句；模型仍须自行对照版本、条件和事实范围，最终语义及任务验收仍走原流程。
+
+完整反馈序列化上限60000字符，包含摘录；超限拒绝，不截断证据。仅展示实际引用的摘录，不自动展开整份来源正文或借用其他引用支持当前行。这个工具也不会替换含缺口的摘录、自动创建Evidence或保存报告。
+
+## 预算和故障语义
+
+工具通过既有ToolExecutor调用，成功或参数失败均按原规则占一次应用工具尝试；不调用模型／Tavily，不使用供应商请求预算，也不追加模型额度。模型读取反馈后若要再生成，仍需原有余额；耗尽时不能无限检查。
+
+read_only=true、普通调用cacheable=false，避免新增Evidence后按相同正文错误复用旧检查。相同operation_id的重放仍复用原回执，并保持既有预算；不同ID是新尝试。历史回执反映当时检查，不是对后来材料的重新核验。没有改动Tool Policy的普遍失败／重放规则。
+
+该开关只提供生成中反馈，**不保证模型会调用工具，也不强制最终报告符合上限**。Agent可能忽略反馈或没有余额继续生成。最终正文和应用门槛仍由调用方原有检查决定；不能把工具的结构passed当作最终报告通过。代价是额外工具调用、上下文及可能的生成回合，需要真实对照验证收益。
+
+## 本轮验证
+
+15项新测试及既有Agent／工具／写作策略测试共30项通过，使用真实Deep Agents图与脚本模型验证inspect_report→ToolMessage→最终正文的接线，不代表真实LLM研究质量。覆盖精确计数、未知引用／来源篡改、未引用混合句保留、围栏拒绝、预算及回执重放、默认三工具不变、策略迟开／移除／更换拒绝、CLI完成态恢复、非法参数在凭证前拒绝及模型不能覆盖冻结限额。
+
+另在禁用网络条件下，对后两题四份保存报告做只读检查，正文合同与原评测逐项相同：
+
+| 保存报告 | 计数／200 | 正文反馈 | 引用结构 |
+| --- | --- | --- | --- |
+| 快照v1 | 192 | passed | passed |
+| 外键v1 | 240 | failed | passed |
+| 快照v2 | 238 | failed | passed |
+| 外键v2 | 193 | passed | passed |
+
+四份原应用门槛仍全部failed，这正说明长度／结构反馈不能替代语义验收。原实验前后逐文件hash一致；本地反馈另存`runs/draft-inspection-replays/20261123-a/result.json`，api_requests=0，semantic_support=not_assessed，不提交原始产物。
+
+本轮零真实API，没有给旧报告注入工具再重生成。候选能力默认关闭，下一次实验应事前固定写作v2、原问题／资料、模型与工具额度，只比较是否启用草稿检查；保留未调用、预算耗尽和质量回退，不能只展示缩短成功的报告。
