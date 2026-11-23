@@ -30,7 +30,7 @@ def main():
     verify.add_argument("--granularity", choices=["line", "clause"], default="line")
     verify.add_argument("--clause-policy", choices=[POLICY_VERSION, V2, V3])
     for command in (verify, benchmark):
-        command.add_argument("--judge-prompt", choices=["v1", "v2"], default="v1")
+        command.add_argument("--judge-prompt", choices=["v1", "v2", "v3"], default="v1")
     for command in (verify, benchmark, comparison):
         command.add_argument("--output", type=Path, default=Path("runs"))
         command.add_argument("--judge-model")
@@ -48,6 +48,8 @@ def main():
             parser.error("--clause-policy requires --granularity clause")
         if args.clause_policy != POLICY_VERSION and args.judge_prompt != "v2":
             parser.error("New clause policies require --judge-prompt v2")
+    if args.action == "verify" and args.judge_prompt == "v3" and args.granularity != "line":
+        parser.error("Candidate v3 currently supports line verification only.")
     load_dotenv()
     if not os.getenv("DEEPSEEK_API_KEY", "").strip():
         print("Missing DEEPSEEK_API_KEY.", file=sys.stderr)

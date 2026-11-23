@@ -90,6 +90,25 @@ A claim about version 2.0 with evidence only about version 1.0 is insufficient, 
 contradicted unless the evidence explicitly denies the claim for 2.0.
 """
 
+SYSTEM_PROMPT_V3 = SYSTEM_PROMPT_V2 + """
+V3 candidate refinement: decide factuality after inspecting EVERY clause of the unit.
+An assertion about when an operation starts, saves, retries, waits or finishes is a
+checkable behavior assertion even if it has no citation or may turn out to be false.
+An uncertainty statement about another clause does not retract the behavior assertion.
+Set factual=true whenever at least one such assertion remains anywhere in unit.text.
+This applies equally to a premise introduced by 'because' inside a recommendation.
+Set factual=false only if ALL clauses lack checkable factual assertions: for example,
+only a research suggestion or only an acknowledgment that an answer is unknown.
+Do not infer facts from words like 'suggestion' or 'insufficient evidence' alone.
+Factuality asks whether there is an assertion to check, NOT whether it is proven.
+Keep uncited assertions factual with links=[]; do not remove them from the denominator.
+Retain the existing single-quote, whole-statement support contract, including versions
+and conditions. Do not reward shorter denominators or borrow the ledger's claim.
+Perform this inspection internally; return ONLY the existing JSON labels and brief
+reasons, without intermediate reasoning, extra fields or atomic-claim lists.
+"""
+
+
 def digest(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -305,11 +324,11 @@ def replay_assessment(payload, saved):
 
 class ModelJudge:
     def __init__(self, model_name, *, prompt_version="v1"):
-        if prompt_version not in {"v1", "v2"}:
+        if prompt_version not in {"v1", "v2", "v3"}:
             raise VerificationError("Unsupported judge prompt version.")
         from langchain_deepseek import ChatDeepSeek
         self.prompt_version = "report-quote-" + prompt_version
-        self.system_prompt = SYSTEM_PROMPT if prompt_version == "v1" else SYSTEM_PROMPT_V2
+        self.system_prompt = {"v1": SYSTEM_PROMPT, "v2": SYSTEM_PROMPT_V2, "v3": SYSTEM_PROMPT_V3}[prompt_version]
         self.prompt_sha256 = digest(self.system_prompt)
         self.model_name = model_name
         self.model = ChatDeepSeek(model=model_name, temperature=0, timeout=90, max_retries=0,

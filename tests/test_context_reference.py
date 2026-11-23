@@ -112,3 +112,21 @@ def test_review_bound_to_unchanged_model_bytes(experiment,tmp_path):
 def test_protected_output_refused(experiment,tmp_path):
     with pytest.raises(RecoveryError): export_reference(experiment,experiment/'review')
     with pytest.raises(RecoveryError): export_reference(experiment,tmp_path/'run/review')
+
+
+def test_readonly_review_survives_code_upgrade_when_contract_inputs_unchanged(experiment,monkeypatch):
+    from researchdesk import context_experiment
+    original=build_packet(experiment)
+    hashes=context_experiment.code_hashes()
+    hashes['verification.py']='0'*64
+    monkeypatch.setattr(context_experiment,'code_hashes',lambda:hashes)
+    assert build_packet(experiment)==original
+    with pytest.raises(RecoveryError): context_experiment.validate_plan(experiment)
+
+
+def test_malformed_historical_code_metadata_rejected(experiment):
+    path=experiment/'plan.json'
+    plan=json.loads(path.read_text(encoding='utf-8'))
+    plan['source_code_sha256']={'verification.py':'not-a-hash'}
+    path.write_text(json.dumps(plan),encoding='utf-8')
+    with pytest.raises(RecoveryError): build_packet(experiment)

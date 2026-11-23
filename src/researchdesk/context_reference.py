@@ -3,6 +3,7 @@ import argparse
 import copy
 import hashlib
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -24,9 +25,14 @@ def build_packet(experiment):
     definitions = [{key: row[key] for key in ('name','run','body')} for row in plan['samples']]
     current = create_plan(definitions, model=plan['model'])
     old_code = plan['source_code_sha256']
-    if not old_code or any(current['source_code_sha256'].get(k)!=v for k,v in old_code.items()):
-        raise RecoveryError('Bound experiment implementation changed.')
-    current['source_code_sha256'] = old_code  # Additional review-only modules may exist now.
+    if (not isinstance(old_code,dict) or not old_code or any(
+            not isinstance(k,str) or re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*\.py',k) is None
+            or not isinstance(v,str) or re.fullmatch(r'[0-9a-f]{64}',v) is None for k,v in old_code.items())):
+        raise RecoveryError('Historical code metadata is invalid.')
+    # Read-only review rebuilds every input and replays every label. Historical code
+    # hashes remain provenance, not a requirement to reinstall byte-identical code.
+    # Paid execution still enforces the original strict code gate.
+    current['source_code_sha256'] = old_code
     if current != plan or result.get('status')!='complete' or len(result['rows'])!=plan['max_sdk_requests']:
         raise RecoveryError('Require a complete, unchanged experiment and frozen inputs.')
     cases=[]

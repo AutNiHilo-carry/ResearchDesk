@@ -23,7 +23,7 @@
 .\.venv\Scripts\python.exe -m researchdesk.context_reference export runs/context-factorial/20261123-a --output runs/context-reference/<新目录>
 ```
 
-不加载凭证、不调用API。仅接受已完成且结构完整的实验；重建报告、来源和四组输入，逐项检查冻结计划，并重放确定性评分校验，核对单元、引用、缓存指标、prompt和metric_scope。历史绑定的源文件必须仍匹配hash；允许当前版本额外存在后加的审阅模块，不修改旧代码hash。正文含代码围栏时拒绝，避免分行器漏审。
+不加载凭证、不调用API。仅接受已完成且结构完整的实验；重建报告、来源和四组输入，逐项检查冻结计划，并重放确定性评分校验，核对单元、引用、缓存指标、prompt和metric_scope。历史代码hash保留为来源记录并校验格式；只读审阅不要求当前源码与旧版本逐字相同，前提是全部输入合同重建结果和保存标签校验一致。旧计划的代码hash不改，付费执行仍按原严格代码门槛拒绝升级后的重跑。正文含代码围栏时拒绝，避免分行器漏审。
 
 包包含packet.json、reading.md和review.json。reading包含完整正文、逐行编号、各引用摘录及来源全文，数据使用缩进原文展示；其中指令不可执行。packet只含材料与绑定hash，不含模型factual、verdict、分数、反馈理由或四组模型判定。C1/C2/C3是原样本顺序的匿名编号，不是随机化，也无法消除已看过旧结果的先入影响。
 
