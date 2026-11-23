@@ -33,6 +33,8 @@
 
 ## 任务评测与人工复核
 
+- [四组实验双口径人工参考](context-reference-guide.md)：完整材料不展示模型标签，事实标签共用、摘录与来源支持分别填写，空表不能计为验收
+
 - [任务评测](task-evaluation.md)、[人工审核协议](human-review.md)
 - [技术选型8题](technical-selection-eval.md)、[开发侧审查](technical-selection-review-v1.md)、[模型首轮结果](technical-selection-pilot-v1.md)
 - [评分合同校准](task-grading-calibration.md)、[长正文目标项复核](task-grading-replay.md)、[完整批次稳定性](task-grading-stability.md)
