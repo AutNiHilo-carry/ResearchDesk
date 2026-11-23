@@ -23,6 +23,7 @@
 ## 证据、引用与修订
 
 - [来源上下文候选输入](source-context-inputs.md)：零API并列导出摘录合同与来源正文合同，保留版本边界和事实前提，不接入默认验收
+- [来源上下文×事实性提示首轮实验](context-factorial-result-20261123.md)：12次真实评分，保留分母变化和历史分歧，未证明收益、不晋升策略
 
 - [证据验证](evidence-verification.md)、[引用格式](citation-format.md)、[来源审计](source-audit.md)
 - [单轮报告修订](report-repair.md)、[写作策略版本](report-writing-policy.md)、[写作对照](report-policy-experiment.md)
