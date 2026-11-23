@@ -23,7 +23,7 @@ ResearchDesk仍在**Phase 3**。五个后端研究案例已在两个冻结批次
 - 研究交付包可携带并离线验包，原报告、保存标签、用量和人工待填材料有绑定；验包不等于研究正确。
 - 保存评分的只读重检、逐行缺口、稳定性对照及双口径参考意见流程可运行；没有把Agent填写的候选参考变成人工金标。
 
-最新运行时代码快照`f90e5b55b34289fc14a568fbbc51bc54f6aeb1e8`的[CI](https://github.com/AutNiHilo-carry/ResearchDesk/actions/runs/45166648840)通过1027项测试及源码目录外wheel检查。测试数验证机制，不能换算为研究准确率、吞吐或生产规模。
+本页原阶段记录采用的运行时代码快照`f90e5b55b34289fc14a568fbbc51bc54f6aeb1e8`的[CI](https://github.com/AutNiHilo-carry/ResearchDesk/actions/runs/45166648840)通过1027项测试及源码目录外wheel检查。测试数验证机制，不能换算为研究准确率、吞吐或生产规模。
 
 ## 已完成实验的结论
 
