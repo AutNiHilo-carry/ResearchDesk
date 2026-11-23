@@ -91,6 +91,16 @@ def load_quality(path, body, evidence, sources):
     return assess(payload, lambda _: {"units": rows})
 
 
+def validate_tool_policy(value):
+    """Validate frozen JSON before numeric dictionary equality or CLI conversion."""
+    if not isinstance(value, dict) or set(value) != set(POLICY_OPTIONS):
+        raise RecoveryError('Workflow tool policy must contain the complete frozen limits.')
+    try:
+        return asdict(ToolLimits(**value))
+    except (TypeError, ValueError, OverflowError):
+        raise RecoveryError('Workflow tool policy has invalid limit types or values.') from None
+
+
 def validate_manifest(manifest, plan):
     expected_policy = dict(version=MODEL_POLICY_VERSION, max_calls=plan["max_model_calls"])
     if manifest.get("question") != plan["question"] or manifest.get("model") != plan["model"] or manifest.get("model_policy") != expected_policy:
@@ -102,8 +112,11 @@ def validate_manifest(manifest, plan):
     actual_report = manifest.get("report_policy")
     if actual_report != expected_report and not (actual_report is None and expected_report["version"] == "v1"):
         raise RecoveryError("Workflow report-writing policy changed.")
-    if "tool_policy" in plan and manifest.get("tool_policy") != plan["tool_policy"]:
-        raise RecoveryError("Workflow tool policy differs from its frozen limits.")
+    if "tool_policy" in plan:
+        expected_tools = validate_tool_policy(plan['tool_policy'])
+        actual_tools = validate_tool_policy(manifest.get('tool_policy'))
+        if actual_tools != expected_tools:
+            raise RecoveryError("Workflow tool policy differs from its frozen limits.")
     if 'search_context_policy' in plan:
         expected_search = plan['search_context_policy']
         validate_search_context(expected_search)
@@ -191,6 +204,8 @@ def run_workflow(directory, *, research_runner=research_main, repair_runner=repa
             return state
         try:
             plan = state["plan"]
+            if 'tool_policy' in plan:
+                validate_tool_policy(plan['tool_policy'])
             documents = []
             for row in plan["documents"]:
                 frozen = (directory / row["path"]).resolve()
@@ -287,9 +302,13 @@ def summary(state):
     lines = ["# ResearchDesk 受检工作流", "", f"状态：{state['status']}；阶段：{state['phase']}。",
         f"研究Run：{state.get('source_run_id')}；候选Run：{state['candidate_run_id']}。",
         f"模型调用上限：{state['plan']['max_model_calls']}；人工复核：pending。", ""]
-    tool_policy = state['plan'].get('tool_policy')
-    if tool_policy is not None:
-        lines += [f"工具调用上限：{tool_policy['max_calls']}；外部请求上限（含重试）：{tool_policy['max_provider_requests']}；额外重试上限：{tool_policy['max_retries']}。", ""]
+    if 'tool_policy' in state['plan']:
+        try:
+            tool_policy = validate_tool_policy(state['plan']['tool_policy'])
+        except RecoveryError:
+            lines += ['工具预算配置无效：需检查冻结计划，未应用替换值或默认额度。', '']
+        else:
+            lines += [f"工具调用上限：{tool_policy['max_calls']}；外部请求上限（含重试）：{tool_policy['max_provider_requests']}；额外重试上限：{tool_policy['max_retries']}。", ""]
     if 'search_context_policy' in state['plan']:
         lines += [f"搜索工具上下文：{state['plan']['search_context_policy']['mode']}。",'']
     if state.get("reason"):
