@@ -33,6 +33,8 @@
 
 ## 任务评测与人工复核
 
+- [已讲解混合句固定回归](factuality-mixed-regression.md)：6条开发案例、5项机制测试，保留真实漏判现场，不计独立人工验收
+
 - [四组实验双口径人工参考](context-reference-guide.md)：完整材料不展示模型标签，事实标签共用、摘录与来源支持分别填写，空表不能计为验收
 
 - [任务评测](task-evaluation.md)、[人工审核协议](human-review.md)

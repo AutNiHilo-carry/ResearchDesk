@@ -1,0 +1,65 @@
+{
+  "version": "evidence-v2",
+  "name": "factuality-mixed-dev-v1",
+  "scope": "Six fixed development examples; case01 was explained as a rule example; not independent human review or held-out evaluation",
+  "label_status": "agent_authored_candidate_references_not_human_gold",
+  "human_review": "pending",
+  "independent_acceptance_eligible": false,
+  "explained_case_ids": ["case01"],
+  "cases": [
+    {
+      "id": "case01",
+      "claim": "保存以端点开始执行为界；未开始执行的情形资料未说明，证据不足。",
+      "quotes": [],
+      "expected_factual": true,
+      "expected_verdicts": [],
+      "reference_reason": "前半句陈述保存行为的起始边界；后半句的资料限制不消除这一事实断言。未引用仍须计入事实分母，不代表已证实该断言。",
+      "development_focus": "explained_mixed_statement"
+    },
+    {
+      "id": "case02",
+      "claim": "目前资料不足，无法判断何时保存结果。",
+      "quotes": [],
+      "expected_factual": false,
+      "expected_verdicts": [],
+      "reference_reason": "只说明无法判断，没有确定系统在何时保存。",
+      "development_focus": "pure_abstention"
+    },
+    {
+      "id": "case03",
+      "claim": "保存以端点开始执行为界。",
+      "quotes": [],
+      "expected_factual": true,
+      "expected_verdicts": [],
+      "reference_reason": "与混合句的前半句形成对照，明确断言行为边界；没有引用不等于没有事实。",
+      "development_focus": "uncited_behavior_assertion"
+    },
+    {
+      "id": "case04",
+      "claim": "建议先核对资料后再判断保存边界。",
+      "quotes": [],
+      "expected_factual": false,
+      "expected_verdicts": [],
+      "reference_reason": "提出研究步骤，不确定系统实际保存行为。",
+      "development_focus": "pure_advice"
+    },
+    {
+      "id": "case05",
+      "claim": "建议沿用原键，因为系统会保存同键首次请求结果。",
+      "quotes": ["系统会保存同键首次请求结果。"],
+      "expected_factual": true,
+      "expected_verdicts": ["supported"],
+      "reference_reason": "建议含有可核查的保存行为前提。摘录是明确构造的测试合同，不是对任何真实服务的能力证明。",
+      "development_focus": "advice_with_factual_premise"
+    },
+    {
+      "id": "case06",
+      "claim": "建议先做实验。",
+      "quotes": [],
+      "expected_factual": false,
+      "expected_verdicts": [],
+      "reference_reason": "纯建议，没有附加系统行为断言。",
+      "development_focus": "minimal_advice_control"
+    }
+  ]
+}
