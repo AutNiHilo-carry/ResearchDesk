@@ -49,3 +49,5 @@ read_only=true、普通调用cacheable=false，避免新增Evidence后按相同�
 四份原应用门槛仍全部failed，这正说明长度／结构反馈不能替代语义验收。原实验前后逐文件hash一致；本地反馈另存`runs/draft-inspection-replays/20261123-a/result.json`，api_requests=0，semantic_support=not_assessed，不提交原始产物。
 
 本轮零真实API，没有给旧报告注入工具再重生成。候选能力默认关闭，下一次实验应事前固定写作v2、原问题／资料、模型与工具额度，只比较是否启用草稿检查；保留未调用、预算耗尽和质量回退，不能只展示缩短成功的报告。
+
+后续已完成[两题off/on真实对照](draft-inspection-pilot-result.md)：实际17次SDK请求、49477返回Token。on两题实际调用检查且过本轮应用门槛，但消耗更高、检查稿与最终稿不同、部分覆盖上涨来自分母变化；默认继续关闭。

@@ -124,6 +124,10 @@ def run_command(command, directory, log_path, timeout, environment=None):
 
 def run_task(task, paths, directory, timeout):
     question = task["question"] + task_suffix(task)  # Rubric/expected criteria never go to generator.
+    inspection = None
+    if task.get('draft_inspection_limit') is not None:
+        from .draft_inspection import policy_spec
+        inspection = policy_spec(task['draft_inspection_limit'])
     directory.mkdir(parents=True, exist_ok=False)
     research = directory / "research"
     command = [sys.executable, "-m", "researchdesk.cli", question, "--local-only",
@@ -135,6 +139,8 @@ def run_task(task, paths, directory, timeout):
         command.extend(["--report-policy", task["report_policy"]])
     if task.get("max_model_calls") is not None:
         command.extend(["--max-model-calls", str(task["max_model_calls"])])
+    if inspection is not None:
+        command.extend(['--draft-inspection-limit',str(inspection['max_chars'])])
     for path in paths:
         command.extend(["--document", str(path)])
     environment = os.environ.copy()
@@ -144,6 +150,8 @@ def run_task(task, paths, directory, timeout):
     run = runs[0] if len(runs) == 1 else None
     status = "timed_out" if outcome["timed_out"] else "generation_failed"
     record = dict(task_id=task["id"], question_sha256=digest(question), **outcome)
+    if inspection is not None:
+        record['draft_inspection_policy'] = inspection
     if task.get('generation_contract', 'legacy') != 'legacy':
         record['generation_contract'] = generation_contract_spec(task)
     if run is not None:
