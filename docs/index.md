@@ -6,6 +6,7 @@
 
 - [五个后端研究案例演示](portfolio-demo-v1.md)、[首轮真实结果与预算](portfolio-cases-result-20261123.md)：21次SDK请求，保留评分失败，模型与应用门槛分别展示
 - [后两题引用失败诊断](portfolio-citation-diagnosis-20261123.md)：4处保存评分缺口与1处混合句候选问题，零API导出待人工复核材料
+- [继承预算的真实单轮修订](portfolio-citation-repair-20261123.md)：新增2次请求，候选引用退化被拒绝、另一题余额不足；两题保留原稿，完成态恢复无消费
 
 - [受检工作流](checked-workflow.md)、[命令行全链路验收](workflow-cli-acceptance.md)
 - [零 API 演示](offline-acceptance.md)、[离线 CI](offline-ci.md)、[wheel 安装](wheel-installation.md)
