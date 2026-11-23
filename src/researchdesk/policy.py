@@ -27,13 +27,19 @@ class ToolLimits:
     max_duration_seconds: float = 180
 
     def __post_init__(self):
-        if self.max_calls < 0 or self.max_provider_requests < 0:
-            raise ValueError("Call and request budgets must be nonnegative")
-        if (not math.isfinite(self.timeout_seconds) or not math.isfinite(self.max_duration_seconds)
-                or self.timeout_seconds <= 0 or self.max_duration_seconds <= 0):
-            raise ValueError("Timeouts must be positive")
-        if not 0 <= self.max_retries <= 3:
-            raise ValueError("Retries must be between zero and three")
+        if any(type(value) is not int or value < 0 for value in (self.max_calls, self.max_provider_requests)):
+            raise ValueError("Call and request budgets must be nonnegative integers")
+        if type(self.max_retries) is not int or not 0 <= self.max_retries <= 3:
+            raise ValueError("Retries must be an integer between zero and three")
+        for value in (self.timeout_seconds, self.max_duration_seconds):
+            if type(value) not in (int, float):
+                raise ValueError("Timeouts must be positive finite numbers")
+            try:
+                valid = math.isfinite(value) and value > 0
+            except OverflowError:
+                valid = False
+            if not valid:
+                raise ValueError("Timeouts must be positive finite numbers")
 
 
 @dataclass(frozen=True)
