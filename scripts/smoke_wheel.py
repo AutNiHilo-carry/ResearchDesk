@@ -227,11 +227,75 @@ def factuality_gate_smoke(root, module):
         receipts.append(dict(case=name,gate='factuality',exit_code=code,status=status))
         print(f'Factuality gate smoke {name}: {status}; exit {code}',flush=True)
     stability_checks = saved_stability_smoke(root/'saved-stability', module, baseline, dataset, judge, relabel)
+    def invalid_runner(*args):
+        record = runner(*args)
+        draft = Path(record['run_directory'])/'draft.md'
+        draft.write_text(draft.read_text(encoding='utf-8')+'\nMissing fact.[E0000000000000000]', encoding='utf-8')
+        return record
+    invalid_source = root/'invalid-source'
+    invalid_result = evaluate_batch(data,tasks,documents,invalid_source,runner=invalid_runner,model_name='fixture',
+                                    task_judge=rubric,evidence_judge=judge)
+    require(invalid_result['status']=='complete' and invalid_result['task_success_rate']==0,
+            'Missing evidence fixture must complete scoring and fail task quality.')
+    invalid_checks = invalid_replay_smoke(root/'invalid-replay',module,invalid_source,dataset,judge)
     require(all(snapshot(p)==before[p] for p in source_dirs),'Factuality gate modified fixture inputs.')
     require(all(p.read_bytes()==raw for p,raw in originals.items()),'Factuality gate changed its dataset.')
     return dict(execution_mode='injected_offline',cases=receipts,source_files_unchanged=True,
-                fixture_model_rates=dict(baseline=0,excluded=1),saved_stability=stability_checks,
+                fixture_model_rates=dict(baseline=0,excluded=1),saved_stability=stability_checks,invalid_replay=invalid_checks,
                 model_requests=0,search_requests=0)
+
+
+def invalid_replay_smoke(root, module, baseline, dataset, judge):
+    """Installed replay must preserve bad links and distinguish task gates from consistency."""
+    from researchdesk.judge_stability import frozen_input, run_stability, payload_hash
+    root.mkdir()
+    payload, controls = frozen_input(baseline,dataset)
+    saved = root/'saved'
+    trials = run_stability(payload,controls,saved,lambda:judge,repeats=2)
+    require(trials['status']=='complete' and all(t['quality']['metrics']['invalid_links']==1 for t in trials['trials']),
+            'Missing evidence must remain invalid in stored repeated scores.')
+    corrupt = root/'corrupt'
+    shutil.copytree(saved,corrupt)
+    changed = json.loads((corrupt/'result.json').read_text(encoding='utf-8'))
+    changed['trials'][0]['quality']['metrics']['invalid_links']=0
+    (corrupt/'result.json').write_text(json.dumps(changed),encoding='utf-8')
+    def snapshot():
+        return {p:p.read_bytes() for directory in (baseline,saved,corrupt) for p in directory.rglob('*') if p.is_file()}
+    before = snapshot()
+    views = root/'summary-view'
+    module('researchdesk.task_eval','--summarize',baseline/'result.json','--dataset',dataset,
+           '--with-quality','--output',views)
+    details = list(views.glob('*/citation-quality.md'))
+    require(len(details)==1 and 'invalid_evidence' in details[0].read_text(encoding='utf-8'),
+            'Installed summary must display the cached integrity failure.')
+    model_view = root/'task-gate'
+    module('researchdesk.task_eval','--check-result',baseline/'result.json','--dataset',dataset,
+           '--gate','model','--output',model_view,expected=3)
+    task_gates = list(model_view.glob('*/gate.json'))
+    require(len(task_gates)==1 and json.loads(task_gates[0].read_text(encoding='utf-8'))['status']=='failed',
+            'Replay must not turn missing evidence into a task pass.')
+    checks = root/'stability-view'
+    module('researchdesk.judge_stability',baseline,'--dataset',dataset,'--check-result',saved/'result.json','--output',checks)
+    gates = list(checks.glob('*/gate.json'))
+    require(len(gates)==1,'Expected a single consistency verdict for missing evidence.')
+    gate = json.loads(gates[0].read_text(encoding='utf-8'))
+    audit = json.loads(gates[0].with_name('audit.json').read_text(encoding='utf-8'))
+    require(gate['status']=='passed' and gate['audit_content_sha256']==payload_hash(audit)
+            and gate['api_requests']==0 and gate['final_acceptance']=='pending',
+            'A consistency pass must preserve audit binding and pending final acceptance.')
+    rejected = root/'rejected-view'
+    module('researchdesk.judge_stability',baseline,'--dataset',dataset,'--check-result',corrupt/'result.json',
+           '--output',rejected,expected=1)
+    require(not rejected.exists(),'Forged invalid-link metrics must not produce a verdict.')
+    require(snapshot()==before,'Installed missing-evidence replay modified source records.')
+    receipts = [dict(case='invalid_summary',gate='rendering_only',exit_code=0,status='rendered'),
+                dict(case='invalid_task_gate',gate='model',exit_code=3,status='failed'),
+                dict(case='invalid_consistency',gate='factuality',exit_code=0,status='passed'),
+                dict(case='forged_invalid_metrics',gate='factuality',exit_code=1,status='input_rejected')]
+    for row in receipts:
+        print(f"Invalid evidence replay smoke {row['case']}: {row['status']}; exit {row['exit_code']}",flush=True)
+    return dict(cases=receipts,source_files_unchanged=True,invalid_links=1,task_success_rate=0,
+                execution_mode='injected_offline',model_requests=0,search_requests=0)
 
 
 def saved_stability_smoke(root, module, baseline, dataset, stable_judge, excluded_judge):
@@ -407,7 +471,8 @@ def smoke(wheel, output):
                   evaluation_gate_process_matrix=True, standalone_body_limit_rejected=True,
                   evaluation_gate_sources_readonly=True, factuality_gate_process_matrix=True,
                   factuality_gate_sources_readonly=True, saved_stability_process_matrix=True,
-                  saved_stability_sources_readonly=True, stability_opinion_process_matrix=True)
+                  saved_stability_sources_readonly=True, stability_opinion_process_matrix=True,
+                  invalid_evidence_replay_process_matrix=True)
     result = dict(version='wheel-smoke-v1', status='passed', checks=checks,
                   wheel=wheel.name, wheel_sha256=hashlib.sha256(wheel.read_bytes()).hexdigest(),
                   python=sys.version.split()[0], package_version=distribution.version,
@@ -418,7 +483,7 @@ def smoke(wheel, output):
     (output / 'summary.md').write_text('# Wheel 安装验收\n\n非 editable 安装，在源码目录之外运行。\n\n'
         + '\n'.join(f'- {name}: passed' for name in checks)
         + '\n\n| 离线样例 | 选择口径 | 退出码 | 状态 |\n|---|---|---:|---|\n'
-        + '\n'.join(f"| {row['case']} | {row['gate']} | {row['exit_code']} | {row['status']} |" for row in gates['cases'] + factuality_gates['cases'] + factuality_gates['saved_stability']['cases'] + factuality_gates['saved_stability']['opinion_import']['cases'])
+        + '\n'.join(f"| {row['case']} | {row['gate']} | {row['exit_code']} | {row['status']} |" for row in gates['cases'] + factuality_gates['cases'] + factuality_gates['saved_stability']['cases'] + factuality_gates['saved_stability']['opinion_import']['cases'] + factuality_gates['invalid_replay']['cases'])
         + '\n\n固定资料、零模型/搜索调用；不代表研究质量验收。\n', encoding='utf-8')
     return result
 

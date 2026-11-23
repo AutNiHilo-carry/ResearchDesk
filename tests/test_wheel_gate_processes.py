@@ -89,7 +89,7 @@ def test_factuality_gate_exit_codes_survive_real_processes(tmp_path,monkeypatch)
         assert process.returncode==expected,(name,process.returncode,process.stdout,process.stderr)
         observed.append(process.returncode)
     result=module.factuality_gate_smoke(tmp_path/'factuality-matrix',child)
-    assert observed==[0,3,3,0,3,3,1,0,3,1,1]
+    assert observed==[0,3,3,0,3,3,1,0,3,1,1,0,3,0,1]
     assert [r['status'] for r in result['cases']]==['passed','review_required','unknown']
     assert result['fixture_model_rates']==dict(baseline=0,excluded=1)
     assert result['source_files_unchanged'] and result['model_requests']==result['search_requests']==0
@@ -98,3 +98,7 @@ def test_factuality_gate_exit_codes_survive_real_processes(tmp_path,monkeypatch)
     assert saved['source_files_unchanged'] and saved['model_requests']==saved['search_requests']==0
     assert [r['status'] for r in saved['opinion_import']['cases']]==['complete','partial','input_rejected','input_rejected']
     assert saved['opinion_import']['label_status']=='synthetic_not_independent_human'
+    invalid=result['invalid_replay']
+    assert [r['status'] for r in invalid['cases']]==['rendered','failed','passed','input_rejected']
+    assert invalid['invalid_links']==1 and invalid['task_success_rate']==0
+    assert invalid['source_files_unchanged'] and invalid['model_requests']==invalid['search_requests']==0

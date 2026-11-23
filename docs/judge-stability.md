@@ -74,6 +74,17 @@ python -m researchdesk.judge_stability runs/generation-contract-plans/5746f5fdbf
 
 坏引用仍计入invalid_links，不会变成支持或覆盖。合成批次测试覆盖缺失引用从最初评分到完整输入冻结、两轮注入评分和离线重检的全链路，原文件不变。即使事实分类与历史一致使factuality门槛为0，原任务仍因坏引用不通过，不能把这个0当成报告质量通过。这些是零API测试桩，不是新的真实模型或人工质量实验。
 
+wheel验收增加一组从生成开始就含缺失引用的合成批次，通过安装后的独立命令实际检查以下边界：
+
+| 场景 | 退出码／状态 | 含义 |
+| --- | --- | --- |
+| task_eval摘要含保存质量明细 | 0／rendered | 能显示invalid_evidence，不代表任务通过 |
+| task_eval模型质量门槛 | 3／failed | 坏引用仍阻止任务通过 |
+| judge_stability历史事实分类重检 | 0／passed | 仅分类一致，坏引用和原任务失败仍保留 |
+| 将保存的invalid_links计数伪改为0 | 1／input_rejected | 不写门槛结果，不覆盖原缓存 |
+
+检查会对源批次、稳定性记录与故意损坏的测试副本逐文件比对，确认命令没有写回。回执位于wheel验收产物的 `factuality_gates.invalid_replay`，摘要逐项列出状态和退出码。子进程禁止socket连接、DNS和dotenv加载，稳定性入口还禁止ModelJudge构建；合成标签不算真实评分或人工质量证据。修订诊断仍明确拒绝完整性无效的证据，本次安装验收没有放宽该入口的合同。
+
 ### 从门槛结果到人工复核
 
 有效保存记录核验后另附 `review.md`、`review-context.json` 和 `review-template.json`，无需再从机器审计文件手工摘句。阅读文件包含原问题、完整评分输入的所有行与引用摘录；不是只挑分类变化行。它保留评分入口的分行正文，摘录不是完整原文，不能把上下文缺失视为反证。
