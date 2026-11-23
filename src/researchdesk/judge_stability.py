@@ -16,7 +16,7 @@ from .review import build_packet
 from .storage import atomic_text
 from .task_eval import (load_taskset, quality_metrics, saved_quality, generation_contract_spec,
                         task_suffix, common_suffix_hash)
-from .verification import ModelJudge, VerificationError, assess, digest, failure_diagnostics, prepare, SYSTEM_PROMPT_V2
+from .verification import ModelJudge, VerificationError, assess, replay_assessment, digest, failure_diagnostics, prepare, SYSTEM_PROMPT_V2
 
 
 def payload_hash(payload):
@@ -275,12 +275,7 @@ def check_stability_result(evaluation, dataset, source, directory):
             if (not trial['request_started'] or saved.get('prompt_version') != controls['prompt_version']
                     or saved.get('judge_prompt_sha256') != controls['prompt_sha256']):
                 raise VerificationError('Completed trial has inconsistent judge identity.')
-            def labels(_):
-                return dict(units=[{k: row[k] for k in ('unit_id', 'factual', 'reason', 'links')} for row in saved['units']])
-            labels.prompt_version, labels.prompt_sha256 = controls['prompt_version'], controls['prompt_sha256']
-            checked = assess(payload, labels)
-            if payload_hash(checked) != payload_hash(saved):
-                raise VerificationError('Saved trial rows or metrics differ from deterministic replay.')
+            checked = replay_assessment(payload, saved)
             metrics = {tid: quality_metrics([row for row in checked['units'] if row['task_id'] == tid])
                        for tid in sorted({row['task_id'] for row in checked['units']})}
             if payload_hash(metrics) != payload_hash(trial.get('task_metrics')):

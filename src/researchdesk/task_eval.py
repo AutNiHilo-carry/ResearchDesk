@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
 from .ledger import now
 from .storage import atomic_text
-from .verification import (ModelJudge, VerificationError, assess, digest, failure_diagnostics,
+from .verification import (ModelJudge, VerificationError, assess, replay_assessment, digest, failure_diagnostics,
                            load_run, prepare, split_units, markdown as quality_markdown)
 from .task_grading import TaskJudge, grade_tasks
 from .run_metrics import run_metrics
@@ -416,15 +416,7 @@ def saved_quality(evaluation, dataset, result):
         raise VerificationError('Saved quality input no longer matches reports and evidence.')
     raw = (evaluation / 'citation-quality.json').read_bytes()
     quality = json.loads(raw.decode('utf-8'))
-    labels = {'units': [{key: row[key] for key in ('unit_id', 'factual', 'reason', 'links')}
-                        for row in quality['units']]}
-    def replay_labels(_):
-        return labels
-    replay_labels.prompt_version = quality.get('prompt_version')
-    replay_labels.prompt_sha256 = quality.get('judge_prompt_sha256')
-    checked = assess(payload, replay_labels)
-    if checked != quality:
-        raise VerificationError('Saved citation rows, coverage or metrics are inconsistent.')
+    checked = replay_assessment(payload, quality)
     for task in result['tasks']:
         if task['generation_status'] == 'completed':
             rows = [row for row in checked['units'] if row['task_id'] == task['task_id']]

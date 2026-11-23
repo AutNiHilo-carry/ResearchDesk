@@ -274,6 +274,35 @@ def assess(payload, judge):
                 metrics=metrics, units=rows, metric_scope=scope)
 
 
+def replay_assessment(payload, saved):
+    """Recompute derived cache fields, including integrity overrides; never judge semantics."""
+    if not isinstance(saved, dict) or saved.get('status') != 'complete':
+        raise VerificationError('Require a complete saved assessment.')
+    integrity = {row['evidence_id']: row['integrity'] for row in payload['evidence']}
+    labels = []
+    for row in saved['units']:
+        links = []
+        for cached in row['links']:
+            link = dict(cached)
+            if link.get('verdict') == 'invalid_evidence':
+                if integrity.get(link.get('evidence_id')) != 'invalid':
+                    raise VerificationError('Saved integrity override has no invalid input evidence.')
+                # The original model verdict was overwritten, so it cannot be recovered.
+                # This placeholder is never accepted as evidence: assess must override it again.
+                link['verdict'] = 'insufficient' if row['factual'] else 'not_applicable'
+            links.append(link)
+        labels.append(dict(unit_id=row['unit_id'], factual=row['factual'], reason=row['reason'], links=links))
+    def replay(_):
+        return dict(units=labels)
+    replay.prompt_version = saved.get('prompt_version')
+    replay.prompt_sha256 = saved.get('judge_prompt_sha256')
+    checked = assess(payload, replay)
+    canonical = lambda value: json.dumps(value, ensure_ascii=False, sort_keys=True)
+    if canonical(checked) != canonical(saved):
+        raise VerificationError('Saved citation rows, integrity overrides or metrics are inconsistent.')
+    return checked
+
+
 class ModelJudge:
     def __init__(self, model_name, *, prompt_version="v1"):
         if prompt_version not in {"v1", "v2"}:
