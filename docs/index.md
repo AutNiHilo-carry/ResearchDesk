@@ -6,6 +6,7 @@
 
 - [受检工作流](checked-workflow.md)、[命令行全链路验收](workflow-cli-acceptance.md)
 - [零 API 演示](offline-acceptance.md)、[离线 CI](offline-ci.md)、[wheel 安装](wheel-installation.md)
+- [可验证研究交付包](delivery-v1.md)：统一报告、证据、保存评分／用量和空白复核材料，可携带离线验包
 - [运行诊断](run-diagnostics.md)、[模型评分与最终验收](model-assessment-boundary.md)
 
 ## 工具、预算和恢复

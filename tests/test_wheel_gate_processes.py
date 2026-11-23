@@ -54,7 +54,7 @@ def test_subprocess_guard_rejects_network_before_running_a_module(tmp_path,snipp
     assert result.returncode!=0 and 'Network disabled' in result.stderr
 
 
-@pytest.mark.parametrize('target',['researchdesk.task_eval','researchdesk.evaluation_audit','researchdesk.judge_stability','researchdesk.stability_review'])
+@pytest.mark.parametrize('target',['researchdesk.task_eval','researchdesk.evaluation_audit','researchdesk.judge_stability','researchdesk.stability_review','researchdesk.delivery'])
 def test_gate_guard_refuses_credential_loading(tmp_path,target):
     module=smoke_module()
     prefix=module.OFFLINE_GUARD.split('sys.argv = [module]')[0]
@@ -63,7 +63,7 @@ def test_gate_guard_refuses_credential_loading(tmp_path,target):
     assert result.returncode!=0 and 'Credential loading disabled' in result.stderr
 
 
-@pytest.mark.parametrize('target',['researchdesk.judge_stability','researchdesk.stability_review'])
+@pytest.mark.parametrize('target',['researchdesk.judge_stability','researchdesk.stability_review','researchdesk.delivery'])
 def test_saved_stability_guard_refuses_model_construction(tmp_path,target):
     module=smoke_module()
     prefix=module.OFFLINE_GUARD.split('sys.argv = [module]')[0]
@@ -89,7 +89,7 @@ def test_factuality_gate_exit_codes_survive_real_processes(tmp_path,monkeypatch)
         assert process.returncode==expected,(name,process.returncode,process.stdout,process.stderr)
         observed.append(process.returncode)
     result=module.factuality_gate_smoke(tmp_path/'factuality-matrix',child)
-    assert observed==[0,3,3,0,3,3,1,0,3,1,1,0,3,0,1]
+    assert observed==[0,3,3,0,3,3,1,0,3,1,1,0,3,0,1,3,0,0,0,1]
     assert [r['status'] for r in result['cases']]==['passed','review_required','unknown']
     assert result['fixture_model_rates']==dict(baseline=0,excluded=1)
     assert result['source_files_unchanged'] and result['model_requests']==result['search_requests']==0
@@ -102,3 +102,5 @@ def test_factuality_gate_exit_codes_survive_real_processes(tmp_path,monkeypatch)
     assert [r['status'] for r in invalid['cases']]==['rendered','failed','passed','input_rejected']
     assert invalid['invalid_links']==1 and invalid['task_success_rate']==0
     assert invalid['source_files_unchanged'] and invalid['model_requests']==invalid['search_requests']==0
+    assert result['delivery']['source_files_unchanged']
+    assert [r['exit_code'] for r in result['delivery']['cases']]==[3,0,0,0,1]

@@ -55,9 +55,20 @@ Copy-Item .env.example .env
 
 详细错误应查看状态、摘要和诊断；其他错误码不在此简表中概括。
 
-## 当前验证证据
+## 一次整理研究交付物
 
-- [最近一次代码验收](https://github.com/AutNiHilo-carry/ResearchDesk/actions/runs/45025420482)：869项离线测试、固定资料演示与源码目录外的 wheel 安装检查通过（2026-11-22，代码快照 `2b06be7`）；本次文档整理引用该快照，不冒充新的代码验收。
+对已有完整评分的批次，可用一个入口输出原报告、证据、质量状态、保存的预算／用量与空白复核材料，再在无需原批次文件的位置离线验包：
+
+```powershell
+.\.venv\Scripts\python.exe -m researchdesk.delivery create <评测目录> --dataset <任务集.json> --output <新的交付目录>
+.\.venv\Scripts\python.exe -m researchdesk.delivery verify <交付目录>
+```
+
+打开交付目录的index.md。create返回3表示包已写成但应用门槛仍失败／未知；verify返回0只表示包内完整性与保存标签一致，人工审核始终待完成。全程零API，未知用量保留null，原文件不变。详见[可验证交付包](docs/delivery-v1.md)。
+
+## 当前代码验证证据
+
+- [交付包更新前的代码基线](https://github.com/AutNiHilo-carry/ResearchDesk/actions/runs/45134687338)：932项离线测试、固定资料演示、强杀回执核验与源码目录外的 wheel 安装检查通过（2026-11-23，代码快照 `3feffce`）。交付包新增验收随本次提交单独运行，不沿用旧快照冒充新增功能结果。
 - [恢复矩阵](docs/recovery-ci.md)、[模型响应/checkpoint 间隙](docs/model-response-gap.md)、[评分结果落盘间隙](docs/workflow-verification-gap.md)：不同窗口采用不同恢复语义，安全停止不等于研究任务完成。
 - [技术选型任务集](docs/technical-selection-eval.md)与[真实模型首轮结果](docs/technical-selection-pilot-v1.md)：生成流程可运行，评分有失败和争议，未证明候选策略更优。
 - [模型评分与验收边界](docs/model-assessment-boundary.md)、[人工复核材料](docs/technical-selection-human-review.md)：评分有效、模型门槛和最终验收分别记录，人工标签仍待填写。

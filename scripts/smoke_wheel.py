@@ -28,12 +28,12 @@ def guard(event, args):
         raise RuntimeError('Network disabled during wheel smoke')
 sys.addaudithook(guard)
 module = sys.argv[1]
-if module in {'researchdesk.task_eval', 'researchdesk.evaluation_audit', 'researchdesk.judge_stability', 'researchdesk.stability_review'}:
+if module in {'researchdesk.task_eval', 'researchdesk.evaluation_audit', 'researchdesk.judge_stability', 'researchdesk.stability_review', 'researchdesk.delivery'}:
     import dotenv
     def no_credentials(*args, **kwargs):
         raise RuntimeError('Credential loading disabled during offline gate smoke')
     dotenv.load_dotenv = no_credentials
-if module in {'researchdesk.judge_stability', 'researchdesk.stability_review'}:
+if module in {'researchdesk.judge_stability', 'researchdesk.stability_review', 'researchdesk.delivery'}:
     import researchdesk.verification
     def no_model(*args, **kwargs):
         raise RuntimeError('Model construction disabled during offline stability smoke')
@@ -238,11 +238,41 @@ def factuality_gate_smoke(root, module):
     require(invalid_result['status']=='complete' and invalid_result['task_success_rate']==0,
             'Missing evidence fixture must complete scoring and fail task quality.')
     invalid_checks = invalid_replay_smoke(root/'invalid-replay',module,invalid_source,dataset,judge)
+    deliveries = delivery_smoke(root/'deliveries',module,invalid_source,excluded,dataset)
     require(all(snapshot(p)==before[p] for p in source_dirs),'Factuality gate modified fixture inputs.')
     require(all(p.read_bytes()==raw for p,raw in originals.items()),'Factuality gate changed its dataset.')
     return dict(execution_mode='injected_offline',cases=receipts,source_files_unchanged=True,
                 fixture_model_rates=dict(baseline=0,excluded=1),saved_stability=stability_checks,invalid_replay=invalid_checks,
+                delivery=deliveries,
                 model_requests=0,search_requests=0)
+
+
+def delivery_smoke(root,module,failed,passed,dataset):
+    root.mkdir()
+    before={p:p.read_bytes() for directory in (failed,passed) for p in directory.rglob('*') if p.is_file()}
+    receipts=[]
+    for name,source,code,status in [('review_required',failed,3,'failed'),('application_pass',passed,0,'passed')]:
+        target=root/name
+        module('researchdesk.delivery','create',source,'--dataset',dataset,'--output',target,expected=code)
+        assessment=json.loads((target/'assessment.json').read_text(encoding='utf-8'))
+        require(assessment['application']['status']==status and assessment['human_review']=='pending',
+                'Installed delivery changed the source application or human gate.')
+        if name=='review_required':
+            require(assessment['quality_metrics']['invalid_links']==1,
+                    'Installed delivery must preserve the missing-evidence cache failure.')
+        module('researchdesk.delivery','verify',target)
+        receipts.extend([dict(case='delivery_'+name,gate='delivery_application',exit_code=code,status=status),
+                         dict(case='verify_'+name,gate='integrity_only',exit_code=0,status='integrity_verified')])
+    target=root/'review_required'
+    (target/'index.md').write_text('Tampered delivery',encoding='utf-8')
+    module('researchdesk.delivery','verify',target,expected=1)
+    receipts.append(dict(case='verify_tampered_delivery',gate='integrity_only',exit_code=1,status='input_rejected'))
+    require({p:p.read_bytes() for directory in (failed,passed) for p in directory.rglob('*') if p.is_file()}==before,
+            'Installed delivery modified its source evaluations.')
+    for row in receipts:
+        print(f"Delivery smoke {row['case']}: {row['status']}; exit {row['exit_code']}",flush=True)
+    return dict(cases=receipts,source_files_unchanged=True,model_requests=0,search_requests=0,
+                scope='injected offline fixtures; integrity is not research accuracy')
 
 
 def invalid_replay_smoke(root, module, baseline, dataset, judge):
@@ -472,7 +502,7 @@ def smoke(wheel, output):
                   evaluation_gate_sources_readonly=True, factuality_gate_process_matrix=True,
                   factuality_gate_sources_readonly=True, saved_stability_process_matrix=True,
                   saved_stability_sources_readonly=True, stability_opinion_process_matrix=True,
-                  invalid_evidence_replay_process_matrix=True)
+                  invalid_evidence_replay_process_matrix=True, portable_delivery_process_matrix=True)
     result = dict(version='wheel-smoke-v1', status='passed', checks=checks,
                   wheel=wheel.name, wheel_sha256=hashlib.sha256(wheel.read_bytes()).hexdigest(),
                   python=sys.version.split()[0], package_version=distribution.version,
@@ -483,7 +513,7 @@ def smoke(wheel, output):
     (output / 'summary.md').write_text('# Wheel 安装验收\n\n非 editable 安装，在源码目录之外运行。\n\n'
         + '\n'.join(f'- {name}: passed' for name in checks)
         + '\n\n| 离线样例 | 选择口径 | 退出码 | 状态 |\n|---|---|---:|---|\n'
-        + '\n'.join(f"| {row['case']} | {row['gate']} | {row['exit_code']} | {row['status']} |" for row in gates['cases'] + factuality_gates['cases'] + factuality_gates['saved_stability']['cases'] + factuality_gates['saved_stability']['opinion_import']['cases'] + factuality_gates['invalid_replay']['cases'])
+        + '\n'.join(f"| {row['case']} | {row['gate']} | {row['exit_code']} | {row['status']} |" for row in gates['cases'] + factuality_gates['cases'] + factuality_gates['saved_stability']['cases'] + factuality_gates['saved_stability']['opinion_import']['cases'] + factuality_gates['invalid_replay']['cases'] + factuality_gates['delivery']['cases'])
         + '\n\n固定资料、零模型/搜索调用；不代表研究质量验收。\n', encoding='utf-8')
     return result
 
