@@ -22,6 +22,8 @@
 
 ## 证据、引用与修订
 
+- [来源上下文候选输入](source-context-inputs.md)：零API并列导出摘录合同与来源正文合同，保留版本边界和事实前提，不接入默认验收
+
 - [证据验证](evidence-verification.md)、[引用格式](citation-format.md)、[来源审计](source-audit.md)
 - [单轮报告修订](report-repair.md)、[写作策略版本](report-writing-policy.md)、[写作对照](report-policy-experiment.md)
 - [分句原文锚点](claim-granularity.md)、[正式分句策略](quality-clause-policy.md)、[粒度诊断](granularity-probe.md)
