@@ -6,7 +6,7 @@
 
 用户提出问题 → 制定计划 → 搜索/读取资料 → 记录证据 → 比较方案 → 生成带引用报告 → 检查、有限修订或转待复核。
 
-**当前处于 Phase 3，工程机制已有验证，研究质量与独立人工标签仍待验收。** 详见 [2026-11-22 阶段交付记录](docs/status-20261122.md)。完整说明集中在 [文档导航](docs/index.md)，方向以 [项目约束](docs/direction.md) 为准。
+**当前处于 Phase 3，工程机制已有验证，研究质量与独立人工标签仍待验收。** 详见 [2026-11-23 阶段交付记录](docs/status-20261123.md)。完整说明集中在 [文档导航](docs/index.md)，方向以 [项目约束](docs/direction.md) 为准。
 
 ## 核心工程贡献
 
@@ -68,7 +68,7 @@ Copy-Item .env.example .env
 
 ## 当前代码验证证据
 
-- [交付包更新前的代码基线](https://github.com/AutNiHilo-carry/ResearchDesk/actions/runs/45134687338)：932项离线测试、固定资料演示、强杀回执核验与源码目录外的 wheel 安装检查通过（2026-11-23，代码快照 `3feffce`）。交付包新增验收随本次提交单独运行，不沿用旧快照冒充新增功能结果。
+- [交付包版本的代码验收](https://github.com/AutNiHilo-carry/ResearchDesk/actions/runs/45143659192)：973项离线测试、固定资料演示、强杀回执核验与源码目录外的 wheel 安装检查通过（2026-11-23，代码快照 `251c6e0`）。安装版本实际创建通过／待审包、独立验包并拒绝篡改；文档整理引用该已完成代码验收。
 - [恢复矩阵](docs/recovery-ci.md)、[模型响应/checkpoint 间隙](docs/model-response-gap.md)、[评分结果落盘间隙](docs/workflow-verification-gap.md)：不同窗口采用不同恢复语义，安全停止不等于研究任务完成。
 - [技术选型任务集](docs/technical-selection-eval.md)与[真实模型首轮结果](docs/technical-selection-pilot-v1.md)：生成流程可运行，评分有失败和争议，未证明候选策略更优。
 - [模型评分与验收边界](docs/model-assessment-boundary.md)、[人工复核材料](docs/technical-selection-human-review.md)：评分有效、模型门槛和最终验收分别记录，人工标签仍待填写。
