@@ -1,8 +1,10 @@
 # 文档导航
 
-首次运行从 [快速开始](quickstart.md) 开始；项目定位和完成边界见 [当前阶段](status-20261123.md) 与 [方向约束](direction.md)。
+首次运行从 [快速开始](quickstart.md) 开始；项目定位和完成边界见 [当前质量阶段](status-20261123-quality.md)、[交付机制快照](status-20261123.md)与 [方向约束](direction.md)。
 
 ## 运行与交付
+
+- [保留两题真实对照](portfolio-reserved-result-20261123.md)：16次请求，四份完整评分均未过应用门槛；五题执行记录已齐，不把验包成功当作质量通过
 
 - [五个后端研究案例演示](portfolio-demo-v1.md)、[首轮真实结果与预算](portfolio-cases-result-20261123.md)：21次SDK请求，保留评分失败，模型与应用门槛分别展示
 - [后两题引用失败诊断](portfolio-citation-diagnosis-20261123.md)：4处保存评分缺口与1处混合句候选问题，零API导出待人工复核材料

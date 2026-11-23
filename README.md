@@ -6,11 +6,11 @@
 
 用户提出问题 → 制定计划 → 搜索/读取资料 → 记录证据 → 比较方案 → 生成带引用报告 → 检查、有限修订或转待复核。
 
-**当前处于 Phase 3，工程机制已有验证，研究质量与独立人工标签仍待验收。** 详见 [2026-11-23 阶段交付记录](docs/status-20261123.md)。完整说明集中在 [文档导航](docs/index.md)，方向以 [项目约束](docs/direction.md) 为准。
+**当前处于 Phase 3，工程机制已有验证，研究质量与独立人工标签仍待验收。** 详见 [2026-11-23 质量阶段汇总](docs/status-20261123-quality.md)。完整说明集中在 [文档导航](docs/index.md)，方向以 [项目约束](docs/direction.md) 为准。
 
 ## 核心工程贡献
 
-[五个后端研究案例与3–5分钟演示](docs/portfolio-demo-v1.md)已加入；[首轮真实结果](docs/portfolio-cases-result-20261123.md)保留v1评分失败及v2仅1/3通过，未晋升默认策略。21次真实SDK请求，独立人工复核仍pending。
+[五个后端研究案例与3–5分钟演示](docs/portfolio-demo-v1.md)已加入，五题已在两个冻结批次执行。[首轮](docs/portfolio-cases-result-20261123.md)保留评分失败；[后两题](docs/portfolio-reserved-result-20261123.md)的四份报告均未过应用门槛。完整状态及实验决定见阶段汇总，不晋升默认策略，独立人工复核仍pending。
 
 Deep Agents / LangGraph 提供 runtime、checkpoint、context 和 tool calling 等 primitive。本项目在这些能力之上设计应用策略，边界如下：
 
