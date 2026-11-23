@@ -1,0 +1,60 @@
+{
+  "version": "research-tasks-v1",
+  "dataset_id": "portfolio-cases-v1",
+  "scope": "project-authored summaries of public official documentation; no database benchmarks or live Stripe calls; not an independent held-out benchmark",
+  "label_status": "project-authored candidate rubrics; pending independent human review",
+  "source_manifest": "portfolio-sources-v1.json",
+  "thresholds": {"citation_precision": 0.9, "evidence_coverage": 0.6},
+  "tasks": [
+    {
+      "id": "sqlite_live_backup",
+      "question": "单机应用持续写入SQLite WAL库。每天只复制主db文件作为备份是否稳妥？根据摘记给出在线备份建议及依据，保留风险边界，不承诺备份零阻塞或已验证断电安全。",
+      "documents": ["fixtures/sqlite-backup-portfolio-v1.md", "fixtures/sqlite-wal-backup-portfolio-v1.md"],
+      "criteria": [
+        {"id": "wal_state", "description": "指出WAL是持久状态，主文件与WAL分离有已提交事务丢失或损坏风险。"},
+        {"id": "online_option", "description": "提出Online Backup API或VACUUM INTO作为有资料依据的在线备份方向。"},
+        {"id": "bounded", "description": "不声称任意分别复制文件都一致、备份完全无锁或已经通过断电实验。"}
+      ]
+    },
+    {
+      "id": "postgres_queue_claim",
+      "question": "多个worker用PostgreSQL 18队列表领取任务，是否可考虑FOR UPDATE SKIP LOCKED？说明适用理由和锁等待边界，不声称所有锁都不等待、严格FIFO或外部副作用恰好一次已经得到保证。",
+      "documents": ["fixtures/postgresql18-queue-portfolio-v1.md"],
+      "criteria": [
+        {"id": "queue_fit", "description": "说明会跳过无法立即获得行锁的行，可用于队列多消费者减少锁竞争。"},
+        {"id": "view_and_lock", "description": "说明不一致视图或不适合一般查询，并保留表锁仍按通常方式获取的限制。"},
+        {"id": "bounded", "description": "不把该选项说成所有锁都不等待、严格FIFO或外部副作用恰好一次的保证。"}
+      ]
+    },
+    {
+      "id": "api_v1_retry_key",
+      "question": "Stripe API v1创建资源返回500后，客户端准备换新幂等键重试。评审此方案，说明同一操作重试的键与参数选择，以及首次端点执行后保存结果的边界；不外推API v2或端到端恰好一次。",
+      "documents": ["fixtures/stripe-api-v1-portfolio-v1.md"],
+      "criteria": [
+        {"id": "same_operation", "description": "同一逻辑操作重试应复用原键和参数，不将换新键说成防重复保证。"},
+        {"id": "saved_500", "description": "明确API v1同键重试返回首次端点执行后保存的结果，包括500。"},
+        {"id": "bounded", "description": "不将该局部规则外推API v2、永久防重或端到端恰好一次。"}
+      ]
+    },
+    {
+      "id": "postgres_read_snapshot",
+      "question": "PostgreSQL 18默认Read Committed事务里，两次普通SELECT之间其他事务提交了更新。是否能仅凭处于同一事务就保证两次结果相同？根据资料解释快照范围，不外推到所有隔离级别。",
+      "documents": ["fixtures/postgresql18-snapshot-portfolio-v1.md"],
+      "criteria": [
+        {"id": "statement_snapshot", "description": "说明普通SELECT使用该查询开始时的快照。"},
+        {"id": "can_change", "description": "明确同一事务的连续SELECT可能因其他事务提交而看到不同数据。"},
+        {"id": "bounded", "description": "结论限定Read Committed普通SELECT，不宣称所有隔离级别都如此。"}
+      ]
+    },
+    {
+      "id": "sqlite_pool_foreignkeys",
+      "question": "SQLite连接池只建了外键DDL，业务事务内再执行PRAGMA foreign_keys=ON。能否据此断言所有连接都已强制检查外键？给出配置与核查建议，不假定所有版本或编译选项的默认值相同。",
+      "documents": ["fixtures/sqlite-foreignkeys-portfolio-v1.md"],
+      "criteria": [
+        {"id": "per_connection", "description": "说明应逐连接明确配置并查询外键开关，不能仅凭DDL或假定默认值。"},
+        {"id": "transaction_boundary", "description": "说明多语句事务中间切换不会报错但不会生效。"},
+        {"id": "bounded", "description": "保留版本或编译选项核查边界，不将建议写成已执行验证。"}
+      ]
+    }
+  ]
+}

@@ -10,6 +10,8 @@
 
 ## 核心工程贡献
 
+[五个后端研究案例与3–5分钟演示](docs/portfolio-demo-v1.md)已加入；[首轮真实结果](docs/portfolio-cases-result-20261123.md)保留v1评分失败及v2仅1/3通过，未晋升默认策略。21次真实SDK请求，独立人工复核仍pending。
+
 Deep Agents / LangGraph 提供 runtime、checkpoint、context 和 tool calling 等 primitive。本项目在这些能力之上设计应用策略，边界如下：
 
 | 能力 | ResearchDesk 实现与验证 | 边界 |

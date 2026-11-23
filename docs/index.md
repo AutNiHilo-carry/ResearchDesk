@@ -4,6 +4,8 @@
 
 ## 运行与交付
 
+- [五个后端研究案例演示](portfolio-demo-v1.md)、[首轮真实结果与预算](portfolio-cases-result-20261123.md)：21次SDK请求，保留评分失败，模型与应用门槛分别展示
+
 - [受检工作流](checked-workflow.md)、[命令行全链路验收](workflow-cli-acceptance.md)
 - [零 API 演示](offline-acceptance.md)、[离线 CI](offline-ci.md)、[wheel 安装](wheel-installation.md)
 - [可验证研究交付包](delivery-v1.md)：统一报告、证据、保存评分／用量和空白复核材料，可携带离线验包

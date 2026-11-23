@@ -1,0 +1,44 @@
+{
+  "version": "portfolio-sources-v1",
+  "captured_at": "2026-11-23",
+  "material_kind": "project_authored_partial_summaries_not_verbatim_web_snapshots",
+  "review_status": "pending_independent_human_review",
+  "sources": [
+    {
+      "document": "fixtures/sqlite-backup-portfolio-v1.md",
+      "url": "https://www.sqlite.org/backup.html",
+      "version_scope": "SQLite unversioned documentation",
+      "sha256": "3e3f701e95ce3156caa7ca8f3985a54216ff1eba74cf499f6e5aad783cea440b"
+    },
+    {
+      "document": "fixtures/sqlite-wal-backup-portfolio-v1.md",
+      "url": "https://www.sqlite.org/wal.html",
+      "version_scope": "SQLite unversioned documentation",
+      "sha256": "ffacacaae75ac1ecd0ca5c27d4a8760b79e694af5a5f00ea39fb333d0b19a268"
+    },
+    {
+      "document": "fixtures/postgresql18-queue-portfolio-v1.md",
+      "url": "https://www.postgresql.org/docs/18/sql-select.html",
+      "version_scope": "PostgreSQL 18",
+      "sha256": "066d4a83616e5cf1839ae59d328d1813ca34af4b38d8372165cfd514cc8f99ac"
+    },
+    {
+      "document": "fixtures/stripe-api-v1-portfolio-v1.md",
+      "url": "https://docs.stripe.com/api/idempotent_requests",
+      "version_scope": "Stripe API v1 only; API v2 excluded",
+      "sha256": "2241a5d0308a70f34f0f77c590beb24b522ca22be740fc224ee4ea719f52e934"
+    },
+    {
+      "document": "fixtures/postgresql18-snapshot-portfolio-v1.md",
+      "url": "https://www.postgresql.org/docs/18/transaction-iso.html",
+      "version_scope": "PostgreSQL 18",
+      "sha256": "ca229f18ea35229d0dab4fd7abb03ae54d9616ca7dabb77c475e787e38239e0e"
+    },
+    {
+      "document": "fixtures/sqlite-foreignkeys-portfolio-v1.md",
+      "url": "https://www.sqlite.org/foreignkeys.html",
+      "version_scope": "SQLite unversioned documentation",
+      "sha256": "1fcbef4380b54e849358be98ddc6131e3fa7d0283b66ab0b0536b7111be84597"
+    }
+  ]
+}

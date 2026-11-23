@@ -1,2 +1,3 @@
 # Keep source-note bytes stable for manifest SHA-256 across checkouts.
 evals/fixtures/*-selection-v1.md text eol=lf
+evals/fixtures/*-portfolio-v1.md text eol=lf
