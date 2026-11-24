@@ -4,12 +4,13 @@ import os
 from deepagents import create_deep_agent
 from langchain_deepseek import ChatDeepSeek
 from langchain.agents.middleware import wrap_model_call, wrap_tool_call
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from .tools import ResearchTools, build_tools
-from .model_budget import BudgetCallbacks, model_budget_for
+from .model_budget import BudgetCallbacks, budget_snapshot, model_budget_for
 from .report_policy import bound_prompt
 from .search_context import PREVIEW_HINT
-from .draft_inspection import HINT as DRAFT_HINT
+from .draft_inspection import HINT as DRAFT_HINT, FINAL_TURN_HINT, FINAL_TURN_VERSION
+from .storage import RecoveryError
 from .report_constraints import counting_instruction
 from .final_body_gate import bind_policy as bind_final_body,HINT as FINAL_BODY_HINT
 
@@ -44,10 +45,32 @@ def build_agent(ledger, limits=None, *, checkpointer=None, model_name=None, allo
                             allowed_tools=allowed_tools)
     application_tools=APPLICATION_TOOLS | ({'inspect_report'} if runtime.inspection_policy is not None else set())
     visible = (application_tools if allowed_tools is None else frozenset(allowed_tools) & application_tools) | {"write_todos"}
+    final_turn_enabled = (runtime.inspection_policy or {}).get('version') == FINAL_TURN_VERSION
+    if final_turn_enabled and (model_budget is None or model_budget.maximum < 1):
+        raise RecoveryError('A positive persisted model budget is required for the final report turn.')
 
     @wrap_model_call
     def model_control(request, handler):
         # Telemetry/admission lives on the shared model to include framework summary calls.
+        if final_turn_enabled:
+            with ledger.store.lock:
+                snapshot = budget_snapshot(ledger.store.conn)
+            remaining = snapshot.get('generation_remaining', snapshot['remaining'])
+            if remaining == 1:
+                runtime.executor.audit('final_model_turn', generation_remaining=remaining)
+                system = request.system_message or SystemMessage(content='')
+                if isinstance(system.content, str):
+                    final_content = system.content + '\n\n' + FINAL_TURN_HINT
+                else:
+                    final_content = [*system.content, {'type': 'text', 'text': FINAL_TURN_HINT}]
+                response = handler(request.override(
+                    tools=[], tool_choice=None,
+                    system_message=system.model_copy(update={'content': final_content}),
+                ))
+                if any(isinstance(message, AIMessage) and (message.tool_calls or message.invalid_tool_calls)
+                       for message in response.result):
+                    raise RecoveryError('The final report turn returned a tool call.')
+                return response
         return handler(request.override(tools=[tool for tool in request.tools if tool.name in visible]))
 
     @wrap_tool_call

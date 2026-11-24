@@ -44,6 +44,8 @@ def main(argv=None, *, model_name=None):
     parser.add_argument("--context-mode", choices=["full", "catalog"], help="imported source presentation (default: full)")
     parser.add_argument("--report-policy", choices=["v1", "v2"], help="writing contract (default: unchanged v1)")
     parser.add_argument('--draft-inspection-limit',type=int,help='Opt-in inspect_report feedback limit; no semantic acceptance')
+    parser.add_argument('--draft-inspection-final-turn', action='store_true',
+                        help='Use the last budgeted model turn to write the report without tools')
     parser.add_argument('--final-body-limit',type=int,help='Opt-in final publication length and citation-structure gate')
     parser.add_argument('--search-context',choices=['full','preview'],help='search tool response presentation; default full')
     parser.add_argument("--output", type=Path, default=Path("runs"))
@@ -56,6 +58,9 @@ def main(argv=None, *, model_name=None):
     args = parser.parse_args(argv)
     if args.max_model_calls is not None and not 0 <= args.max_model_calls <= 1000:
         parser.error("--max-model-calls must be 0..1000")
+    if args.draft_inspection_final_turn and (args.resume or args.demo or args.draft_inspection_limit is None
+                                           or not args.max_model_calls):
+        parser.error('--draft-inspection-final-turn requires a new live run with --draft-inspection-limit and a positive --max-model-calls')
     if args.draft_inspection_limit is not None:
         try: draft_inspection_spec(args.draft_inspection_limit)
         except ValueError: parser.error('--draft-inspection-limit must be 1..100000')
@@ -144,7 +149,8 @@ def main(argv=None, *, model_name=None):
                 metadata["report_policy"] = policy_spec(args.report_policy or "v1")
                 metadata['search_context_policy'] = search_context_spec(args.search_context or 'full')
             if args.draft_inspection_limit is not None:
-                metadata['draft_inspection_policy']=draft_inspection_spec(args.draft_inspection_limit)
+                metadata['draft_inspection_policy'] = draft_inspection_spec(
+                    args.draft_inspection_limit, final_turn=args.draft_inspection_final_turn)
                 if metadata['allowed_tools'] is not None:
                     metadata['allowed_tools'].append('inspect_report')
             if args.final_body_limit is not None:

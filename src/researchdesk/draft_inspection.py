@@ -13,16 +13,27 @@ HINT = """本次可调用 inspect_report(report) 检查最终正文草稿。
 最终仍直接输出完整报告，工具结果不是最终报告，也不会替你保存正文。
 """
 
+FINAL_TURN_VERSION = 'draft-inspection-final-turn-v1'
+FINAL_TURN_HINT = (
+    '这是模型预算允许的最后一轮。现在直接输出完整 Markdown 报告正文。'
+    '只使用已记录的证据及其完整引用编号。资料不足时保留结论。'
+)
 
-def policy_spec(max_chars):
-    return dict(version='draft-inspection-v1',max_chars=policy(max_chars)['max_chars'],hint_sha256=digest(HINT))
+
+def policy_spec(max_chars, *, final_turn=False):
+    spec = dict(version='draft-inspection-v1', max_chars=policy(max_chars)['max_chars'], hint_sha256=digest(HINT))
+    if final_turn:
+        spec.update(version=FINAL_TURN_VERSION, final_turn_hint_sha256=digest(FINAL_TURN_HINT))
+    return spec
 
 
 def manifest_policy(directory):
     path=directory/'run.json'
     spec=json.loads(path.read_text(encoding='utf-8')).get('draft_inspection_policy') if path.is_file() else None
-    if spec is not None and (not isinstance(spec,dict) or spec!=policy_spec(spec.get('max_chars'))):
-        raise RecoveryError('Draft inspection policy changed or is invalid.')
+    if spec is not None:
+        if not isinstance(spec, dict) or spec != policy_spec(
+                spec.get('max_chars'), final_turn=spec.get('version') == FINAL_TURN_VERSION):
+            raise RecoveryError('Draft inspection policy changed or is invalid.')
     return spec
 
 
