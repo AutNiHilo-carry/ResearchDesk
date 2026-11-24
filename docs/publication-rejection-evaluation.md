@@ -44,3 +44,5 @@
 本地可读机制示例：`runs/publication-rejection-examples/20261124-a/summary.md`，明确标注为脚本输出而非真实研究成绩。显示publication_rejected、not_scored、模型unknown、应用failed、201/200与publication=blocked。provenance保存源结果hash、零API和原文件不变声明；原始示例与测试数据留在runs，不提交仓库。
 
 默认最终门槛和草稿工具仍关闭，不因分类更准确就宣称报告质量改善。当前保持Phase 3，后续真实对照应同时记录未发布候选、已消耗资源与最终交付率，不能靠跳过失败评分抬高结果。
+
+后续真实对照中，203/200 的队列候选触发 `publication_rejected`。评分只覆盖已发布的同组报告，候选的 3 次生成请求计入用量。[真实运行记录](final-gate-comparison-20261124.md)
