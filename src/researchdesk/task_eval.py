@@ -413,7 +413,7 @@ def summary(result, *, quality_details=False):
              "valid仅表示评分合同通过；model_gate为模型辅助判定，不代表人工验收。",
              "invalid表示评分无效；not_scored表示未进入语义评分；unknown不计为模型通过。", "",
              "publication_rejected表示正文已保存但最终发布门槛拒绝，不能当作已交付报告；不调用评分器。", "",
-             "Task Success Rate 沿用已交付报告的原模型要求；未交付任务计失败，发布门槛可在评分前拦截。正文检查另列。",
+             "Task Success Rate 沿用已交付报告的原模型口径，不含长度约束；未交付任务计失败，发布门槛可在评分前拦截。正文检查另列。",
              "旧结果 not_checked 不自动补判为通过；应用检查通过仍不是人工验收。", "",
              "| Task | Generation | Scoring | Model gate | Body limit | Application gate | Citation precision | Coverage | Tokens | Seconds | Retries |",
              "|---|---|---|---|---|---|---:|---:|---:|---:|---:|"]
