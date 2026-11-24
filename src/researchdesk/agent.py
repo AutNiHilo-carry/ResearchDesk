@@ -11,6 +11,7 @@ from .report_policy import bound_prompt
 from .search_context import PREVIEW_HINT
 from .draft_inspection import HINT as DRAFT_HINT
 from .report_constraints import counting_instruction
+from .final_body_gate import bind_policy as bind_final_body,HINT as FINAL_BODY_HINT
 
 PROMPT = """你是 ResearchDesk 的 Lead Research Agent。独立完成研究，不委派子 Agent。
 先用 write_todos 制定简短计划，再搜索、阅读和记录证据，最后直接输出 Markdown 报告。
@@ -34,6 +35,7 @@ def single_lead_model(request, handler):
 
 
 def build_agent(ledger, limits=None, *, checkpointer=None, model_name=None, allowed_tools=None):
+    final_body_policy=bind_final_body(ledger)
     model_budget = model_budget_for(ledger)
     model = ChatDeepSeek(model=model_name or os.getenv("DEEPSEEK_MODEL", "deepseek-flash"),
                          temperature=0, timeout=60, max_retries=0, max_tokens=4096)
@@ -69,6 +71,8 @@ def build_agent(ledger, limits=None, *, checkpointer=None, model_name=None, allo
         prompt += '\n'+PREVIEW_HINT
     if runtime.inspection_policy is not None and 'inspect_report' in visible:
         prompt += '\n'+DRAFT_HINT+'\n'+counting_instruction(runtime.inspection_policy['max_chars'])
+    if final_body_policy is not None:
+        prompt += '\n'+FINAL_BODY_HINT+'\n'+counting_instruction(final_body_policy['constraint_policy']['max_chars'])
     prompt = bound_prompt(ledger, prompt, "generation")
     return create_deep_agent(
         model=model,

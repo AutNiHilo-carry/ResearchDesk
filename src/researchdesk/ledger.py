@@ -82,10 +82,13 @@ class Ledger:
 
     def save_report(self, report):
         atomic_text(self.directory / "draft.md", report)
+        from .final_body_gate import enforce
         try:
             report = archive_and_normalize(self.directory, report)
         except CitationSyntaxError as error:
+            enforce(self,report)
             raise CitationValidationError(str(error)) from error
+        enforce(self,report)
         cited = self.validate_report(report)
         atomic_text(self.directory / "draft.md", report)
         appendix = ["", "## Evidence Ledger", "",
