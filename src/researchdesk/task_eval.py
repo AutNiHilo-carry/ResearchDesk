@@ -125,10 +125,17 @@ def run_command(command, directory, log_path, timeout, environment=None):
 
 def run_task(task, paths, directory, timeout):
     question = task["question"] + task_suffix(task)  # Rubric/expected criteria never go to generator.
+    final_turn = task.get('draft_inspection_final_turn', False)
+    model_limit = task.get('max_model_calls')
+    if type(final_turn) is not bool:
+        raise VerificationError('Draft inspection final turn must be a boolean.')
+    if final_turn and (task.get('draft_inspection_limit') is None or
+                       type(model_limit) is not int or not 1 <= model_limit <= 1000):
+        raise VerificationError('Draft inspection final turn requires draft inspection and a positive model limit.')
     inspection = None
     if task.get('draft_inspection_limit') is not None:
         from .draft_inspection import policy_spec
-        inspection = policy_spec(task['draft_inspection_limit'])
+        inspection = policy_spec(task['draft_inspection_limit'], final_turn=final_turn)
     final_policy = None
     if task.get('final_body_limit') is not None:
         from .final_body_gate import policy_spec as final_spec
@@ -146,6 +153,8 @@ def run_task(task, paths, directory, timeout):
         command.extend(["--max-model-calls", str(task["max_model_calls"])])
     if inspection is not None:
         command.extend(['--draft-inspection-limit',str(inspection['max_chars'])])
+    if final_turn:
+        command.append('--draft-inspection-final-turn')
     if final_policy is not None:
         command.extend(['--final-body-limit',str(final_policy['constraint_policy']['max_chars'])])
     for path in paths:
