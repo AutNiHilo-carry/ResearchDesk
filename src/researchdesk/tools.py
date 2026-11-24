@@ -1,4 +1,5 @@
 """Research tools behind the application-side Tool Policy layer."""
+import json
 from urllib.parse import urlsplit
 import httpx
 from langchain_core.tools import tool
@@ -91,9 +92,15 @@ class ResearchTools:
     def inspect_report(self,report):
         spec=bind_inspection(self.ledger)
         try:
-            return inspect_draft(report,self.ledger.evidence,self.ledger.sources,spec['max_chars'])
+            result = inspect_draft(report,self.ledger.evidence,self.ledger.sources,spec['max_chars'])
         except ValueError:
             raise ToolFailure('invalid_draft','Draft format or feedback size is invalid; no semantic judgment was made.') from None
+        from .final_body_gate import manifest_policy
+        if 'overflow_policy' in (manifest_policy(self.ledger.directory) or {}):
+            result['checked_draft'] = report
+            if len(json.dumps(result, ensure_ascii=False)) > 60000:
+                raise ToolFailure('invalid_draft', 'Draft feedback and exact body exceed the size limit.')
+        return result
 
     def request(self, endpoint, payload):
         if not self.api_key:

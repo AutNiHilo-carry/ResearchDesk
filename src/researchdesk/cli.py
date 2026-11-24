@@ -47,6 +47,8 @@ def main(argv=None, *, model_name=None):
     parser.add_argument('--draft-inspection-final-turn', action='store_true',
                         help='Use the last budgeted model turn to write the report without tools')
     parser.add_argument('--final-body-limit',type=int,help='Opt-in final publication length and citation-structure gate')
+    parser.add_argument('--reuse-checked-draft-on-overflow', action='store_true',
+                        help='Publish the latest valid inspected draft when the final candidate only exceeds its length limit')
     parser.add_argument('--search-context',choices=['full','preview'],help='search tool response presentation; default full')
     parser.add_argument("--output", type=Path, default=Path("runs"))
     parser.add_argument("--max-tool-calls", type=int)
@@ -70,6 +72,9 @@ def main(argv=None, *, model_name=None):
         try: final_body_spec(args.final_body_limit)
         except ValueError: parser.error('--final-body-limit must be 1..100000')
         if args.resume or args.demo: parser.error('Final body gate is only configured on new live runs.')
+    if args.reuse_checked_draft_on_overflow and (args.resume or args.demo or args.final_body_limit is None
+                                                or args.draft_inspection_limit is None):
+        parser.error('--reuse-checked-draft-on-overflow requires a new live run with both draft and final body limits')
     load_dotenv()
     if args.doctor:
         present = {key: bool(os.getenv(key, "").strip()) for key in ("DEEPSEEK_API_KEY", "TAVILY_API_KEY")}
@@ -154,7 +159,8 @@ def main(argv=None, *, model_name=None):
                 if metadata['allowed_tools'] is not None:
                     metadata['allowed_tools'].append('inspect_report')
             if args.final_body_limit is not None:
-                metadata['final_body_policy']=final_body_spec(args.final_body_limit)
+                metadata['final_body_policy'] = final_body_spec(
+                    args.final_body_limit, reuse_checked_draft=args.reuse_checked_draft_on_overflow)
             atomic_text(directory / "run.json", json.dumps(metadata, ensure_ascii=False, indent=2))
             documents = []
             for path in args.document:
@@ -188,9 +194,15 @@ def main(argv=None, *, model_name=None):
             content = message.content
             if isinstance(content, list):
                 content = "\n".join(block.get("text", "") for block in content if isinstance(block, dict))
-            report_path = ledger.save_report(content)
+            from .final_body_gate import select_body
+            selected, selection = select_body(ledger, content)
+            report_path = ledger.save_report(selected)
+            if selection is not None:
+                metadata['overflow_selection'] = selection
         metadata.update(status="completed", finished_at=now(), report=str(report_path))
         atomic_text(directory / "run.json", json.dumps(metadata, ensure_ascii=False, indent=2))
+        if metadata.get('overflow_selection') is not None:
+            print(f"Published the checked draft. Oversized candidate: {directory / 'overflow-candidate.md'}")
         print(f"Report: {report_path}")
         return 0
     except (Exception, KeyboardInterrupt) as error:

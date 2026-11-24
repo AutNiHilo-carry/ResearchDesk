@@ -19,15 +19,19 @@ class FinalBodyRejected(RecoveryError):
     pass
 
 
-def policy_spec(max_chars):
-    return dict(version='final-body-gate-v1',constraint_policy=policy(max_chars),hint_sha256=digest(HINT))
+def policy_spec(max_chars, *, reuse_checked_draft=False):
+    spec = dict(version='final-body-gate-v1', constraint_policy=policy(max_chars), hint_sha256=digest(HINT))
+    if reuse_checked_draft:
+        spec['overflow_policy'] = 'reuse-checked-draft-v1'
+    return spec
 
 
 def manifest_policy(directory):
     path=directory/'run.json'
     spec=json.loads(path.read_text(encoding='utf-8')).get('final_body_policy') if path.is_file() else None
     if spec is not None:
-        try: valid=spec==policy_spec(spec['constraint_policy']['max_chars'])
+        try: valid=spec==policy_spec(spec['constraint_policy']['max_chars'],
+                                    reuse_checked_draft=spec.get('overflow_policy')=='reuse-checked-draft-v1')
         except (TypeError,KeyError,ValueError): valid=False
         if not valid: raise RecoveryError('Invalid final body policy.')
     return spec
@@ -78,6 +82,57 @@ def attach_preflight(result,spec,rows):
                   matches_last_preflight=preflight['body_sha256']==result['body_constraints']['body_sha256'] if preflight else None)
 
 
+def checked_fallback(candidate, evidence, sources, spec, rows):
+    """Select only the newest completed preflight and recheck it against current sources."""
+    limit = spec['constraint_policy']['max_chars']
+    check = evaluate(candidate, evidence, sources, limit)
+    if check['body_constraints']['reasons'] != ['body_too_long'] or check['citation_structure'] != 'passed':
+        return None
+    for (raw,) in rows:
+        receipt = json.loads(raw)
+        if 'body_constraints' not in receipt:
+            continue
+        draft = receipt.get('checked_draft')
+        if not isinstance(draft, str):
+            return None
+        # The receipt must still agree with the exact draft and its quoted evidence.
+        try:
+            preflight = inspect(draft, evidence, sources, receipt['body_constraints']['policy']['max_chars'])
+            normalized = normalize_citation_delimiters(draft)
+        except (ValueError, TypeError, KeyError):
+            return None
+        if (receipt != dict(preflight, checked_draft=draft) or not preflight['body_constraints']['passed']
+                or evaluate(normalized, evidence, sources, limit)['status'] != 'passed'):
+            return None
+        return normalized
+    return None
+
+
+def select_body(ledger, candidate):
+    spec = bind_policy(ledger)
+    if not spec or 'overflow_policy' not in spec:
+        return candidate, None
+    try:
+        normalized = normalize_citation_delimiters(candidate)
+    except CitationSyntaxError:
+        return candidate, None
+    with ledger.store.lock:
+        rows = ledger.store.conn.execute("SELECT result FROM dispatches WHERE tool='inspect_report' AND result IS NOT NULL ORDER BY rowid DESC").fetchall()
+    selected = checked_fallback(normalized, ledger.evidence, ledger.sources, spec, rows)
+    if selected is None:
+        return candidate, None
+    original_path = ledger.directory/'overflow-candidate.md'
+    selection = selection_receipt(candidate, selected)
+    atomic_text(original_path, candidate)
+    atomic_text(ledger.directory/'overflow-selection.json', json.dumps(selection, indent=2))
+    return selected, selection
+
+
+def selection_receipt(candidate, selected):
+    return dict(policy='reuse-checked-draft-v1', reason='body_too_long',
+                candidate_sha256=digest(candidate), selected_sha256=digest(selected))
+
+
 def verify_completed(directory):
     spec=manifest_policy(directory)
     with closing(sqlite3.connect((directory/'application.sqlite3').resolve().as_uri()+'?mode=ro',uri=True)) as connection:
@@ -85,13 +140,22 @@ def verify_completed(directory):
         checks=connection.execute("SELECT result FROM dispatches WHERE tool='inspect_report' AND result IS NOT NULL ORDER BY rowid DESC").fetchall()
     if row is None and spec is None: return
     if row is None or json.loads(row[0])!=spec: raise RecoveryError('Completed final body policy binding changed.')
-    report,evidence,sources,_=load_run(directory)
+    report,evidence,sources,metadata=load_run(directory)
     saved=json.loads((directory/'final-body-check.json').read_text(encoding='utf-8'))
     expected=evaluate(report,evidence,sources,spec['constraint_policy']['max_chars'])
     attach_preflight(expected,spec,checks)
     if (expected['status']!='passed' or saved!=expected
             or not (directory/'report.md').read_text(encoding='utf-8').startswith(report+'\n\n## Evidence Ledger\n')):
         raise RecoveryError('Completed final body or its receipt changed.')
+    selection_path = directory/'overflow-selection.json'
+    overflow_path = directory/'overflow-candidate.md'
+    if metadata.get('overflow_selection') is not None or selection_path.exists() or overflow_path.exists():
+        candidate = overflow_path.read_text(encoding='utf-8')
+        selection = json.loads(selection_path.read_text(encoding='utf-8'))
+        if ('overflow_policy' not in spec
+                or checked_fallback(normalize_citation_delimiters(candidate), evidence, sources, spec, checks) != report
+                or selection != selection_receipt(candidate, report) or metadata.get('overflow_selection') != selection):
+            raise RecoveryError('Completed draft selection differs from its receipt.')
 
 
 def verify_rejection(directory):
