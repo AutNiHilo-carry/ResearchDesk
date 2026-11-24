@@ -40,6 +40,8 @@
 
 ## 任务评测与人工复核
 
+- [最终发布拒绝的评测状态](publication-rejection-evaluation.md)：核验失败回执后区分publication_rejected，未发布候选不触发语义评分，保留已消费用量
+
 - [整句事实前提v3真实对照](mixed-prompt-v3-pilot.md)：8次请求，两提示标签相同、不晋升；修复源码升级阻断旧材料只读审阅的问题
 
 - [已讲解混合句固定回归](factuality-mixed-regression.md)：6条开发案例、5项机制测试，保留真实漏判现场，不计独立人工验收

@@ -1,11 +1,16 @@
 """Explicit prepublication body gate; no semantic scoring or model calls."""
 import json
 import sqlite3
+import hashlib
+import shutil
+import tempfile
+from pathlib import Path
 from contextlib import closing
 from .draft_inspection import inspect
 from .report_constraints import policy, check_body
 from .storage import RecoveryError,atomic_text
 from .verification import digest,load_run
+from .citations import normalize_citation_delimiters,CitationSyntaxError
 
 HINT='最终正文发布前由应用检查长度和引用结构；超限会拒绝发布，不自动补轮。该检查不证明语义或业务要求满足。'
 
@@ -87,3 +92,49 @@ def verify_completed(directory):
     if (expected['status']!='passed' or saved!=expected
             or not (directory/'report.md').read_text(encoding='utf-8').startswith(report+'\n\n## Evidence Ledger\n')):
         raise RecoveryError('Completed final body or its receipt changed.')
+
+
+def verify_rejection(directory):
+    """Read stopped rejected candidates from a private WAL-aware SQLite snapshot."""
+    metadata=json.loads((directory/'run.json').read_text(encoding='utf-8'))
+    spec=manifest_policy(directory)
+    if (metadata.get('status')!='failed' or metadata.get('error_type')!='FinalBodyRejected'
+            or spec is None or (directory/'report.md').exists()):
+        raise RecoveryError('Not a stopped prepublication gate rejection.')
+    paths=[directory/('application.sqlite3'+s) for s in ('','-wal','-journal')]
+    def signatures():
+        result={}
+        for p in paths:
+            if p.is_symlink() or (p.exists() and not p.resolve().is_relative_to(directory.resolve())):
+                raise RecoveryError('Gate database escapes its run.')
+            result[p.name]=hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else None
+        return result
+    before=signatures()
+    if before['application.sqlite3'] is None: raise RecoveryError('Missing gate database.')
+    with tempfile.TemporaryDirectory(prefix='researchdesk-rejected-gate-') as temporary:
+        target=Path(temporary)
+        for p in paths:
+            if before[p.name] is not None:
+                shutil.copyfile(p,target/p.name)
+                if hashlib.sha256((target/p.name).read_bytes()).hexdigest()!=before[p.name]:
+                    raise RecoveryError('Gate database changed during copy.')
+        if signatures()!=before: raise RecoveryError('Gate database changed during copy.')
+        with closing(sqlite3.connect(target/'application.sqlite3')) as connection:
+            if connection.execute('PRAGMA user_version').fetchone()[0]!=1:
+                raise RecoveryError('Unsupported gate database version.')
+            row=connection.execute("SELECT payload FROM records WHERE kind='final_body_policy' AND id='singleton'").fetchone()
+            if row is None or json.loads(row[0])!=spec: raise RecoveryError('Rejected gate policy binding changed.')
+            sources={r['id']:r for (raw,) in connection.execute("SELECT payload FROM records WHERE kind='sources'") for r in [json.loads(raw)]}
+            evidence={r['id']:r for (raw,) in connection.execute("SELECT payload FROM records WHERE kind='evidence'") for r in [json.loads(raw)]}
+            checks=connection.execute("SELECT result FROM dispatches WHERE tool='inspect_report' AND result IS NOT NULL ORDER BY rowid DESC").fetchall()
+    if signatures()!=before: raise RecoveryError('Gate database changed during reading.')
+    report=(directory/'draft.md').read_text(encoding='utf-8')
+    try: report=normalize_citation_delimiters(report)
+    except CitationSyntaxError: pass  # Malformed input is checked in its original form by enforce().
+    expected=evaluate(report,evidence,sources,spec['constraint_policy']['max_chars'])
+    attach_preflight(expected,spec,checks)
+    raw=(directory/'final-body-check.json').read_bytes()
+    if expected['status']!='failed' or json.loads(raw)!=expected:
+        raise RecoveryError('Rejected final body or its receipt changed.')
+    return dict(status='rejected',check=expected,receipt_sha256=hashlib.sha256(raw).hexdigest(),
+                semantic_scoring='not_performed',publication='blocked')

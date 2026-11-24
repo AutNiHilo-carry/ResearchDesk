@@ -6,6 +6,7 @@ import math
 import os
 import re
 import signal
+import sqlite3
 import subprocess
 import sys
 import time
@@ -128,6 +129,10 @@ def run_task(task, paths, directory, timeout):
     if task.get('draft_inspection_limit') is not None:
         from .draft_inspection import policy_spec
         inspection = policy_spec(task['draft_inspection_limit'])
+    final_policy = None
+    if task.get('final_body_limit') is not None:
+        from .final_body_gate import policy_spec as final_spec
+        final_policy=final_spec(task['final_body_limit'])
     directory.mkdir(parents=True, exist_ok=False)
     research = directory / "research"
     command = [sys.executable, "-m", "researchdesk.cli", question, "--local-only",
@@ -141,6 +146,8 @@ def run_task(task, paths, directory, timeout):
         command.extend(["--max-model-calls", str(task["max_model_calls"])])
     if inspection is not None:
         command.extend(['--draft-inspection-limit',str(inspection['max_chars'])])
+    if final_policy is not None:
+        command.extend(['--final-body-limit',str(final_policy['constraint_policy']['max_chars'])])
     for path in paths:
         command.extend(["--document", str(path)])
     environment = os.environ.copy()
@@ -152,6 +159,8 @@ def run_task(task, paths, directory, timeout):
     record = dict(task_id=task["id"], question_sha256=digest(question), **outcome)
     if inspection is not None:
         record['draft_inspection_policy'] = inspection
+    if final_policy is not None:
+        record['final_body_policy'] = final_policy
     if task.get('generation_contract', 'legacy') != 'legacy':
         record['generation_contract'] = generation_contract_spec(task)
     if run is not None:
@@ -162,8 +171,33 @@ def run_task(task, paths, directory, timeout):
             if outcome["returncode"] == 0 and manifest.get("status") == "completed":
                 status = "completed"
             record["model"] = manifest.get("model")
+            if final_policy is not None or manifest.get('final_body_policy') is not None:
+                try:
+                    from .final_body_gate import verify_completed,verify_rejection
+                    if manifest.get('final_body_policy')!=final_policy:
+                        raise VerificationError('Runtime final body policy differs from the task.')
+                    if status=='completed': verify_completed(run)
+                    elif not outcome['timed_out'] and manifest.get('error_type')=='FinalBodyRejected':
+                        if outcome['returncode']==0:
+                            raise VerificationError('Rejected publication cannot have a successful process exit.')
+                        publication=verify_rejection(run)
+                        constraints=check_body(normalized_candidate(run))
+                        if constraints['body_sha256']!=publication['check']['body_constraints']['body_sha256']:
+                            raise VerificationError('Rejected candidate changed after receipt verification.')
+                        record.update(publication=publication,constraints=constraints)
+                        status='publication_rejected'
+                except (ValueError,OSError,KeyError,TypeError,sqlite3.Error) as error:
+                    status='invalid_artifacts'
+                    record['error_type']=type(error).__name__
     record["generation_status"] = status
     return record
+
+
+def normalized_candidate(run):
+    from .citations import normalize_citation_delimiters,CitationSyntaxError
+    text=(run/'draft.md').read_text(encoding='utf-8')
+    try: return normalize_citation_delimiters(text)
+    except CitationSyntaxError: return text
 
 
 def quality_metrics(rows):
@@ -377,8 +411,9 @@ def summary(result, *, quality_details=False):
              f"Generation Completion Rate: {result.get('generation_completion_rate')}", "",
              "Human review: pending; Final acceptance: pending（本入口不执行人工验收）。",
              "valid仅表示评分合同通过；model_gate为模型辅助判定，不代表人工验收。",
-             "invalid表示评分无效；not_scored表示生成未完成；unknown不计为模型通过。", "",
-             "Task Success Rate 保留原模型口径，不含长度约束；应用检查单独合并模型与确定性检查。",
+             "invalid表示评分无效；not_scored表示未进入语义评分；unknown不计为模型通过。", "",
+             "publication_rejected表示正文已保存但最终发布门槛拒绝，不能当作已交付报告；不调用评分器。", "",
+             "Task Success Rate 沿用已交付报告的原模型要求；未交付任务计失败，发布门槛可在评分前拦截。正文检查另列。",
              "旧结果 not_checked 不自动补判为通过；应用检查通过仍不是人工验收。", "",
              "| Task | Generation | Scoring | Model gate | Body limit | Application gate | Citation precision | Coverage | Tokens | Seconds | Retries |",
              "|---|---|---|---|---|---|---:|---:|---:|---:|---:|"]
@@ -395,6 +430,15 @@ def summary(result, *, quality_details=False):
             check = row['constraints']
             counts.append(f"Body count {row['task_id']}: {check.get('counted_chars')}/200 Unicode codepoints; policy body-length-v1.")
     lines += [''] + counts
+    rejected=[row for row in result['tasks'] if row.get('generation_status')=='publication_rejected']
+    if rejected:
+        lines+=['','## 最终发布被拒绝','']
+        for row in rejected:
+            check=row['publication']['check']
+            body=check['body_constraints']
+            lines.append(f"- {row['task_id']}: {body['counted_chars']}/{body['policy']['max_chars']}; "
+                         f"body={body['status']}; citation_structure={check['citation_structure']}; "
+                         'semantic_support=not_assessed; publication=blocked.')
     lines += ["", f"Generation tokens: {result.get('generation_total_tokens')}",
               f"Evaluator tokens: {result.get('evaluator_total_tokens')}",
               "Monetary cost and Recovery Rate: N/A (not measured by this batch).", ""]
