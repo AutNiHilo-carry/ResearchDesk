@@ -6,7 +6,8 @@ import re
 from pathlib import Path
 from .review import fingerprint
 from .storage import atomic_text
-from .verification import VerificationError, digest, load_run, prepare, split_units, covered_by_verdicts
+from .verification import (VerificationError, covered_by_verdicts, digest, factuality_check,
+                           load_run, prepare, split_units)
 
 
 CONTROLS_VERSION = "evaluation-controls-v2"
@@ -48,6 +49,36 @@ def _factuality_audit(task_rows, old_labels, new_labels, *, available, input_ide
             coverage_increased_with_fewer_factual_units=increased))
     view['status'] = 'review_required' if changed else 'no_factuality_change' if view['tasks'] else 'no_unchanged_reports'
     return view
+
+
+def changed_report_factuality(task_rows, old_labels, new_labels, materials):
+    changed = [row['task_id'] for row in task_rows if row['report_changed'] is True]
+    if not changed or not old_labels or not new_labels:
+        return dict(status='unavailable' if changed else 'no_changed_reports',
+                    tasks=[], review_required_task_ids=[])
+    original, revised = [{row['evidence_id']: row for row in material['quoted_evidence']}
+                         for material in materials]
+    comparable = {eid for eid, row in original.items() if row['integrity'] == 'valid' and revised.get(eid) == row}
+
+    def saved_task(labels, task_id):
+        units = [row for row in labels.values() if row['task_id'] == task_id]
+        factual = [row for row in units if row['factual']]
+        verdicts = [link['verdict'] for row in factual for link in row['links']]
+        supported = verdicts.count('supported')
+        covered = sum(covered_by_verdicts(True, {link['verdict'] for link in row['links']}) for row in factual)
+        return dict(units=units, metrics=dict(factual_units=len(factual), covered_units=covered,
+            citation_links=len(verdicts), supported_links=supported,
+            citation_precision=supported / len(verdicts) if verdicts else None,
+            evidence_coverage=covered / len(factual) if factual else None))
+
+    tasks = []
+    for task_id in changed:
+        before, after = (saved_task(labels, task_id) for labels in (old_labels, new_labels))
+        check = factuality_check(before, after, comparable_evidence_ids=comparable)
+        tasks.append(dict(task_id=task_id, before=before['metrics'], after=after['metrics'], **check))
+    review = [row['task_id'] for row in tasks if row['status'] == 'review_required']
+    status = 'review_required' if review else 'unknown' if any(row['status'] == 'unknown' for row in tasks) else 'compared'
+    return dict(status=status, tasks=tasks, review_required_task_ids=review)
 
 
 def compare_evaluations(baseline_directory, candidate_directory):
@@ -102,7 +133,8 @@ def compare_evaluations(baseline_directory, candidate_directory):
     def bound_input(result, material):
         declared = result.get('quality_input_sha256')
         if material['units']:
-            _, actual = prepare(material['units'], material['evidence'], material['sources'])
+            payload, actual = prepare(material['units'], material['evidence'], material['sources'])
+            material['quoted_evidence'] = payload['evidence']
             if declared is not None and declared != actual:
                 raise VerificationError('Saved citation input differs from current reports and evidence.')
             return actual if declared is not None else None
@@ -175,6 +207,7 @@ def compare_evaluations(baseline_directory, candidate_directory):
                                     candidate='verified' if new_input else 'not_recorded'),
         citation_label_validation='unit_anchors_and_reference_ids_not_semantic_regrading_or_metric_replay',
         citation_input_identical=input_identical, factuality_audit=factuality,
+        changed_report_factuality_audit=changed_report_factuality(rows, old_labels, new_labels, materials),
         unchanged_reports=sum(row["report_changed"] is False for row in rows),
         changed_reports=sum(row["report_changed"] is True for row in rows),
         unchanged_success_disagreements=[row["task_id"] for row in rows if row["report_changed"] is False
@@ -229,6 +262,13 @@ def audit_summary(audit):
             f"覆盖率 {before['evidence_coverage']} → {after['evidence_coverage']}；"
             f"排除行 {[u['unit_id'] for u in row['excluded_units']]}。")
     detail_text = '\n'.join(details)
+    changed = audit.get('changed_report_factuality_audit', {})
+    changed_lines = [
+        f"- {row['task_id']}：{row['status']}，唯一匹配 {row['matched_units']} 行，"
+        f"标签变化 {len(row['changes'])} 行，分母缩小时升高的指标 {row['ratio_increases_with_smaller_denominator']}。"
+        for row in changed.get('tasks', [])
+    ]
+    changed_text = '\n'.join(changed_lines)
     return ("# 配对实验审计\n\n"
         f"控制条件指纹版本：{audit.get('controls_version', 'legacy_unversioned')}。\n\n"
         f"正文未变化：{audit['unchanged_reports']}；正文变化：{audit['changed_reports']}。\n\n"
@@ -238,6 +278,8 @@ def audit_summary(audit):
         f"未变正文的事实/引用标签分歧：{len(audit['unchanged_report_citation_disagreements'])} 项。\n\n"
         f"事实分母检查：{factuality['status']}；覆盖率升高伴随事实排除的任务：{factuality['coverage_increase_task_ids']}。\n\n"
         f"{detail_text}\n\n"
+        f"已改报告中原样保留行的事实性检查：{changed.get('status', 'unknown_legacy')}。\n\n"
+        f"{changed_text}\n\n"
         "事实行被排除导致的更高覆盖率需要复核，不能据此认定正文改进；零事实行的覆盖率为未知。\n\n"
         "相同正文的评分差异不能归因于报告修订；需人工复核及重复实验。单次运行不能量化评分方差。\n")
 

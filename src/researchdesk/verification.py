@@ -1,4 +1,5 @@
 """Report-to-quote verification. Model judgments are estimates, not ground truth."""
+from collections import defaultdict
 import hashlib
 import json
 import re
@@ -241,6 +242,68 @@ def prepare(units, evidence, sources, *, max_units=60, max_chars=60000):
 
 def covered_by_verdicts(factual, verdicts):
     return factual and "supported" in verdicts and "contradicted" not in verdicts
+
+
+def factuality_check(original, candidate, *, comparable_evidence_ids=None):
+    """Compare uniquely identifiable unchanged rows using already validated labels."""
+    view = dict(status='unknown', reasons=[], matched_units=0, changes=[], ambiguous=[],
+                ratio_increases_with_smaller_denominator=[], scope='exact_text_and_evidence_ids',
+                human_review='pending', api_requests=0)
+    if original is None or candidate is None:
+        view['reasons'].append('requires_both_saved_assessments')
+        return view
+
+    def index(result):
+        rows = defaultdict(list)
+        for row in result['units']:
+            rows[(row['text'], tuple(row['citations']))].append(row)
+        return rows
+
+    old, new = index(original), index(candidate)
+    evidence_mismatches = 0
+    for key, left in old.items():
+        if key not in new:
+            continue
+        if comparable_evidence_ids is not None and not comparable_evidence_ids.issuperset(key[1]):
+            evidence_mismatches += 1
+            continue
+        right = new[key]
+        if len(left) != 1 or len(right) != 1:
+            view['ambiguous'].append(dict(original_units=[r['unit_id'] for r in left],
+                                          candidate_units=[r['unit_id'] for r in right]))
+            continue
+        before, after = left[0], right[0]
+        view['matched_units'] += 1
+        if before['factual'] != after['factual']:
+            view['changes'].append(dict(text=before['text'], citations=before['citations'],
+                original_unit=before['unit_id'], candidate_unit=after['unit_id'],
+                original_factual=before['factual'], candidate_factual=after['factual']))
+
+    if any(change['original_factual'] for change in view['changes']):
+        before, after = original['metrics'], candidate['metrics']
+        for ratio, numerator, denominator in (
+            ('citation_precision', 'supported_links', 'citation_links'),
+            ('evidence_coverage', 'covered_units', 'factual_units'),
+        ):
+            if (before[ratio] is not None and after[ratio] is not None and after[ratio] > before[ratio]
+                    and after[denominator] < before[denominator] and after[numerator] <= before[numerator]):
+                view['ratio_increases_with_smaller_denominator'].append(ratio)
+
+    if view['ambiguous']:
+        view['reasons'].append('ambiguous_unchanged_units')
+    if comparable_evidence_ids is not None:
+        view['scope'] = 'exact_text_and_identical_valid_evidence'
+        view['unmatched_evidence_groups'] = evidence_mismatches
+        if evidence_mismatches:
+            view['reasons'].append('evidence_inputs_differ_or_invalid')
+    if not view['matched_units']:
+        view['reasons'].append('no_unique_unchanged_units')
+    if view['changes']:
+        view['reasons'].append('unchanged_unit_factuality_changed')
+        view['status'] = 'review_required'
+    elif not view['reasons']:
+        view['status'] = 'passed'
+    return view
 
 
 def assess(payload, judge):

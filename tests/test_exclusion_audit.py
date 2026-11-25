@@ -81,6 +81,70 @@ def test_missing_labels_do_not_imply_no_exclusion(gap_evaluation, tmp_path):
     assert view['status'] == 'unavailable' and view['tasks'] == []
 
 
+def test_changed_report_keeps_unchanged_row_disagreements_in_the_paired_audit(gap_evaluation, tmp_path):
+    from researchdesk.ledger import Ledger
+    evaluation, dataset, _ = gap_evaluation
+    baseline, candidate = comparison_fixture((evaluation, dataset, None), tmp_path)
+    run = candidate / 'tasks/case/research' / ('a' * 32)
+    report, evidence, sources, _ = load_run(run)
+    first, duplicate, inference = report.splitlines()
+    assert first == duplicate
+    revised = '\n'.join([inference, first, duplicate, 'A new heading'])
+    ledger = Ledger(run, resume=True)
+    try:
+        ledger.save_report(revised)
+    finally:
+        ledger.store.close()
+    rows = split_units(revised)
+    for row in rows:
+        row.update(unit_id='case:' + row['unit_id'], task_id='case')
+    payload, fingerprint = prepare(rows, evidence, sources)
+
+    def saved(_):
+        return dict(units=[dict(unit_id=row['unit_id'], factual=bool(row['citations']), reason='Fixture',
+            links=[dict(evidence_id=eid, verdict='supported', reason='Fixture') for eid in row['citations']])
+            for row in rows])
+
+    score = assess(payload, saved)
+    (candidate / 'citation-quality.json').write_text(json.dumps(score), encoding='utf-8')
+    result_path = candidate / 'result.json'
+    result = json.loads(result_path.read_bytes())
+    result['quality_input_sha256'] = fingerprint
+    result['tasks'][0]['quality'] = quality_metrics(score['units'])
+    result_path.write_text(json.dumps(result), encoding='utf-8')
+    before = {p: p.read_bytes() for root in (baseline, candidate) for p in root.rglob('*') if p.is_file()}
+
+    audit = compare_evaluations(baseline, candidate)
+    assert audit['changed_reports'] == 1 and audit['factuality_audit']['status'] == 'no_unchanged_reports'
+    view = audit['changed_report_factuality_audit']
+    assert view['status'] == 'review_required' and view['review_required_task_ids'] == ['case']
+    check, = view['tasks']
+    assert check['matched_units'] == 1 and len(check['ambiguous']) == 1
+    change, = check['changes']
+    assert (change['original_unit'], change['candidate_unit']) == ('case:U3', 'case:U1')
+    assert check['ratio_increases_with_smaller_denominator'] == ['evidence_coverage']
+    assert check['before']['covered_units'] == check['after']['covered_units'] == 2
+    assert check['before']['evidence_coverage'] == 2/3 and check['after']['evidence_coverage'] == 1.0
+    assert '已改报告中原样保留行的事实性检查：review_required' in audit_summary(audit)
+    assert {p: p.read_bytes() for root in (baseline, candidate) for p in root.rglob('*') if p.is_file()} == before
+
+
+def test_changed_report_does_not_pair_exact_text_with_an_unverified_quote():
+    from researchdesk.evaluation_audit import changed_report_factuality
+    eid = 'E' + 'a' * 16
+    base = dict(unit_id='case:U1', task_id='case', text='Claim', citations=[eid])
+    old = dict(base, factual=True, links=[dict(evidence_id=eid, verdict='supported')])
+    new = dict(base, factual=False, links=[dict(evidence_id=eid, verdict='invalid_evidence')])
+    result = changed_report_factuality([dict(task_id='case', report_changed=True)],
+        {'case:U1': old}, {'case:U1': new},
+        [dict(quoted_evidence=[dict(evidence_id=eid, integrity=integrity)]) for integrity in ('valid', 'invalid')])
+    check, = result['tasks']
+    assert check['status'] == 'unknown'
+    assert check['unmatched_evidence_groups'] == 1 and check['matched_units'] == 0
+    assert check['changes'] == []
+    assert 'evidence_inputs_differ_or_invalid' in check['reasons']
+
+
 def test_unknown_verdict_is_rejected_before_counting(gap_evaluation, tmp_path):
     baseline, candidate = pair_with_labels(gap_evaluation, tmp_path)
     path = candidate / 'citation-quality.json'
