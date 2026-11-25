@@ -10,6 +10,8 @@ python -m researchdesk.granularity_probe RUN --body RUN/revisions/candidate.md -
 
 单位数、无引用单位数和候选引用绑定数仅为结构统计，不是事实数、质量分或准确率。状态固定prepared_unscored，metrics为null，人工审核pending。不复用行级标签填充分句标签，不自动发起请求，不改变默认拆分策略或旧分数。冻结包覆盖整个语料，未引用语料变动也会改变冻结哈希。
 
+SQLite 在线备份的回退草稿中，三个分句版本都将逗号连接的阻塞和断电判断保存在同一个片段。行尾的断电摘录成为该片段的候选引用，原行并未为阻塞判断绑定读锁证据。将阻塞判断单列一行并引用读锁摘录后，逐行与分句输入都能保留独立绑定。新增的合成案例覆盖了三版策略及拆行前后的证据集合，语义是否充分仍按原评分合同核验。[回退草稿的证据复核](final-body-gate-guide.md#回退草稿的证据复核)
+
 ## 真实样本发现（2026-11-15）
 
 包位置：`runs/report-policy-live/wal-v2-20261115/granularity-packet-v1.json`。
