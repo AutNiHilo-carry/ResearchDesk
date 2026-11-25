@@ -33,7 +33,7 @@ def run_demo(ledger):
         "此演示仅验证资料、证据和报告的落盘流程，不能验证研究质量。")
 
 
-def main(argv=None, *, model_name=None):
+def main(argv=None, *, model_name=None, run_id=None):
     parser = argparse.ArgumentParser(description="ResearchDesk")
     parser.add_argument("question", nargs="?")
     parser.add_argument("--resume", help="resume a run ID under --output")
@@ -75,7 +75,8 @@ def main(argv=None, *, model_name=None):
     if args.reuse_checked_draft_on_overflow and (args.resume or args.demo or args.final_body_limit is None
                                                 or args.draft_inspection_limit is None):
         parser.error('--reuse-checked-draft-on-overflow requires a new live run with both draft and final body limits')
-    load_dotenv()
+    if not args.demo or args.doctor:
+        load_dotenv()
     if args.doctor:
         present = {key: bool(os.getenv(key, "").strip()) for key in ("DEEPSEEK_API_KEY", "TAVILY_API_KEY")}
         for key, value in present.items():
@@ -101,7 +102,9 @@ def main(argv=None, *, model_name=None):
         parser.error("--report-policy is for live research, not --demo")
     if args.search_context is not None and (args.demo or args.local_only):
         parser.error('--search-context is for web-enabled research only')
-    directory = args.output / (args.resume or uuid4().hex)
+    if run_id is not None and (args.resume or not re.fullmatch(r"[0-9a-f]{32}", run_id)):
+        parser.error("A supplied run ID is only valid for a new run.")
+    directory = args.output / (args.resume or run_id or uuid4().hex)
     metadata = None
     stack = ExitStack()
     try:

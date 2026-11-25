@@ -17,6 +17,7 @@ dependencies = [
 ]
 [project.optional-dependencies]
 dev = ["pytest>=8,<10"]
+web = ["fastapi==0.165.0", "uvicorn==0.54.0"]
 [project.scripts]
 researchdesk = "researchdesk.cli:main"
 [tool.pytest.ini_options]

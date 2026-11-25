@@ -40,6 +40,17 @@ python -m venv .venv
 
 打开命令打印的 `summary.md`，查看权限、摘录、预算、回执复用和引用缺口的七项检查。无需 `.env` 或 API Key；安装依赖需要网络。演示使用固定资料和固定标签，不验证真实研究质量。见 [快速开始](docs/quickstart.md) 和 [演示合同](docs/offline-acceptance.md)。
 
+## 本地网页
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[web]"
+.\.venv\Scripts\python.exe -m researchdesk.web
+```
+
+打开 [本地工作台](http://127.0.0.1:8765)，选择「运行离线示例」，然后点击报告中的引用查看出处。FastAPI 同时提供 [API 文档](http://127.0.0.1:8765/docs)。运行记录独立保存在 `runs/web`。
+
+需要真实研究时，配置本地模型凭证并用 `python -m researchdesk.web --allow-live` 启动。可以粘贴资料启动本地研究，也可以在配置搜索凭证后选择网页研究。网页可中断当前进程；运行已准备完成时，恢复会沿用原 ID、资料与预算。服务绑定本机回环地址。
+
 ## 真实研究与恢复
 
 真实研究调用 DeepSeek / Tavily，会产生费用；先按快速开始配置本地 `.env`。doctor 只检查配置存在性，不验证密钥有效性。

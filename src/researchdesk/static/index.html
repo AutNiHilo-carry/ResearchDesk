@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="ResearchDesk 本地研究工作台">
+  <title>ResearchDesk · 研究工作台</title>
+  <link rel="stylesheet" href="/static/workbench.css">
+  <script type="module" src="/static/workbench.js"></script>
+</head>
+<body>
+  <header class="masthead">
+    <div class="identity"><span class="mark" aria-hidden="true">R</span><span>ResearchDesk</span></div>
+    <span class="connection" id="connection">连接中</span>
+  </header>
+  <div class="layout">
+    <aside class="rail">
+      <button id="compose" class="new-run" type="button"><span aria-hidden="true">+</span> 新建研究</button>
+      <h2>运行记录</h2>
+      <nav id="history" aria-label="运行记录"><p class="muted">读取本地运行记录…</p></nav>
+    </aside>
+    <main>
+      <div id="error" class="notice error" role="alert" hidden></div>
+      <section id="editor" aria-labelledby="editor-title">
+        <h1 id="editor-title">新建研究</h1>
+        <p class="intro">生成带引用的报告，并查看每条结论背后的证据。</p>
+        <form id="research-form" class="surface">
+          <label for="mode">运行方式</label>
+          <select id="mode" name="mode">
+            <option value="demo">离线示例</option>
+            <option value="local" disabled>基于本地资料</option>
+            <option value="web" disabled>使用网页搜索</option>
+          </select>
+          <p id="mode-help" class="help">使用固定资料演示报告与证据，无外部 API 请求。</p>
+          <div id="question-fields" hidden>
+            <label for="question">研究问题</label>
+            <textarea id="question" name="question" rows="3" maxlength="4000" placeholder="例如：持续写入 SQLite WAL 时，如何获得一致备份？"></textarea>
+            <div id="source-fields" hidden>
+              <label for="notes">本地资料</label>
+              <textarea id="notes" name="notes" rows="5" maxlength="50000" placeholder="粘贴支持研究的资料…"></textarea>
+            </div>
+            <label for="budget">最多模型调用次数</label>
+            <input id="budget" name="budget" type="number" min="1" max="12" value="6">
+          </div>
+          <div class="form-actions">
+            <button id="start" class="primary" type="submit">运行离线示例</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="detail" aria-labelledby="run-title" hidden>
+        <header class="detail-head">
+          <div>
+            <p class="run-id" id="run-id"></p>
+            <h1 id="run-title"></h1>
+          </div>
+          <span id="run-status" class="status" aria-live="polite"></span>
+        </header>
+        <div id="run-actions" class="actions" hidden>
+          <button id="stop" class="secondary" type="button" hidden>中断运行</button>
+          <button id="resume" class="primary" type="button" hidden>恢复运行</button>
+          <span id="resume-count" class="muted"></span>
+        </div>
+        <dl class="metrics" id="metrics">
+          <div><dt>模型调用</dt><dd id="model-calls">—</dd></div>
+          <div><dt>工具调用</dt><dd id="tool-calls">—</dd></div>
+          <div><dt>搜索请求</dt><dd id="provider-requests">—</dd></div>
+        </dl>
+        <div class="result-layout">
+          <article class="surface report">
+            <h2>研究报告</h2>
+            <div id="report" class="prose"></div>
+          </article>
+          <aside class="surface evidence" aria-labelledby="evidence-title">
+            <h2 id="evidence-title">引用证据</h2>
+            <p id="evidence-prompt" class="muted">选择报告中的引用，查看对应摘录和来源。</p>
+            <div id="evidence-content" aria-live="polite" hidden>
+              <p id="evidence-id" class="run-id"></p>
+              <h3 id="source-title"></h3>
+              <blockquote id="snippet"></blockquote>
+              <a id="source-link" target="_blank" rel="noopener noreferrer" hidden>打开来源</a>
+              <p id="source-name" class="muted location"></p>
+            </div>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

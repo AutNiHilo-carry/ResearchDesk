@@ -1,0 +1,230 @@
+const byId = (id) => document.getElementById(id);
+const states = {
+  running: "运行中", completed: "已完成", interrupted: "已中断",
+  failed: "失败", budget_exhausted: "额度用尽",
+};
+const modes = { demo: "离线示例", local: "本地资料", web: "网页研究" };
+const messages = {
+  403: "真实研究未启用，请使用离线示例或重新启动服务。",
+  404: "找不到这次运行。",
+  409: "当前无法执行该操作，请查看运行状态。",
+  422: "请检查问题、资料和模型调用上限。",
+};
+let selection = location.hash.slice(1) || null;
+let latest = null;
+let renderedReport = null;
+let renderedHistory = null;
+let refreshing = false;
+let submitting = false;
+let active = false;
+
+async function request(path, options) {
+  const response = await fetch(path, options);
+  if (!response.ok) throw new Error(messages[response.status] || "操作失败，请重试。");
+  return response.json();
+}
+
+function showError(error = null) {
+  byId("error").hidden = !error;
+  byId("error").textContent = error?.message || "";
+}
+
+function setMode() {
+  const mode = byId("mode").value;
+  byId("question-fields").hidden = mode === "demo";
+  byId("question").required = mode !== "demo";
+  byId("source-fields").hidden = mode !== "local";
+  byId("notes").required = mode === "local";
+  byId("mode-help").textContent = {
+    demo: "使用固定资料演示报告与证据，无外部 API 请求。",
+    local: "由模型分析你粘贴的资料，不发起网页搜索。",
+    web: "提交后会调用模型服务和搜索服务。",
+  }[mode];
+  byId("start").textContent = mode === "demo" ? "运行离线示例" : "开始研究";
+  byId("start").disabled = submitting || active;
+}
+
+function renderHistory(records) {
+  const key = JSON.stringify([selection, records]);
+  if (key === renderedHistory) return;
+  renderedHistory = key;
+  const nav = byId("history");
+  nav.replaceChildren();
+  if (!records.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "暂无运行记录";
+    nav.append(empty);
+  }
+  for (const run of records) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "history-item";
+    button.setAttribute("aria-current", String(selection === run.id));
+    const title = document.createElement("span");
+    title.className = "history-title";
+    title.textContent = run.question;
+    const meta = document.createElement("span");
+    meta.className = "history-meta";
+    meta.textContent = `${modes[run.mode]} · ${states[run.status]}`;
+    button.append(title, meta);
+    button.addEventListener("click", () => showRun(run.id));
+    nav.append(button);
+  }
+}
+
+function showEvidence(id, evidence, button) {
+  for (const citation of document.querySelectorAll(".citation")) {
+    citation.setAttribute("aria-pressed", String(citation === button));
+  }
+  byId("evidence-prompt").hidden = true;
+  byId("evidence-content").hidden = false;
+  byId("evidence-id").textContent = id;
+  byId("source-title").textContent = evidence.title || "来源摘录";
+  byId("snippet").textContent = evidence.snippet;
+  byId("source-name").textContent = evidence.location || "";
+  const link = byId("source-link");
+  link.hidden = !/^https?:\/\//i.test(evidence.location || "");
+  if (!link.hidden) link.href = evidence.location;
+  if (matchMedia("(max-width: 990px)").matches) byId("evidence-title").scrollIntoView({ block: "nearest" });
+}
+
+function renderReport(run) {
+  const key = JSON.stringify([run.id, run.report, run.status, run.exit_code, run.error_type]);
+  if (key === renderedReport) return;
+  renderedReport = key;
+  byId("evidence-prompt").hidden = false;
+  byId("evidence-content").hidden = true;
+  const report = byId("report");
+  report.replaceChildren();
+  if (!run.report) {
+    const placeholder = document.createElement("p");
+    placeholder.className = "muted";
+    placeholder.textContent = run.status === "running" ? "研究进行中，报告完成后会自动显示。"
+      : run.exit_code === 2 ? "缺少模型或搜索服务配置。"
+      : run.status === "interrupted" && run.can_resume ? "运行已中断，可以从已有状态恢复。"
+      : run.status === "budget_exhausted" ? "模型调用额度已用完，当前没有完成的报告。"
+      : "当前没有完成的报告。";
+    report.append(placeholder);
+    return;
+  }
+  for (const line of run.report.split("\n")) {
+    if (!line.trim()) continue;
+    const heading = /^#{1,6}\s+/.test(line);
+    const node = document.createElement(heading ? "h3" : "p");
+    const text = line.replace(/^#{1,6}\s+/, "");
+    let offset = 0;
+    for (const match of text.matchAll(/\[(E[0-9a-f]{16})\]/g)) {
+      node.append(text.slice(offset, match.index));
+      const evidence = run.evidence[match[1]];
+      if (evidence) {
+        const citation = document.createElement("button");
+        citation.type = "button";
+        citation.className = "citation";
+        citation.textContent = match[1];
+        citation.setAttribute("aria-label", `查看引用 ${match[1]}`);
+        citation.setAttribute("aria-pressed", "false");
+        citation.addEventListener("click", () => showEvidence(match[1], evidence, citation));
+        node.append(citation);
+      } else {
+        node.append(match[0]);
+      }
+      offset = match.index + match[0].length;
+    }
+    node.append(text.slice(offset));
+    report.append(node);
+  }
+}
+
+function renderRun(run) {
+  latest = run;
+  byId("run-id").textContent = run.id;
+  byId("run-title").textContent = run.question;
+  byId("run-status").textContent = states[run.status];
+  byId("run-status").dataset.state = run.status;
+  byId("stop").hidden = !run.can_stop;
+  byId("resume").hidden = !run.can_resume;
+  byId("run-actions").hidden = !run.can_stop && !run.can_resume && !run.resume_count;
+  byId("resume-count").textContent = run.resume_count ? `已恢复 ${run.resume_count} 次` : "";
+  byId("model-calls").textContent = run.model_limit
+    ? `${run.metrics.model_calls ?? "—"} / ${run.model_limit}` : run.metrics.model_calls ?? "—";
+  byId("tool-calls").textContent = run.metrics.tool_calls ?? "—";
+  byId("provider-requests").textContent = run.metrics.provider_requests ?? "—";
+  renderReport(run);
+  byId("editor").hidden = true;
+  byId("detail").hidden = false;
+}
+
+async function refresh() {
+  if (refreshing) return;
+  refreshing = true;
+  try {
+    const snapshot = await request("/api/runs");
+    byId("connection").textContent = snapshot.allow_live ? "本地 · 支持真实研究" : "本地 · 离线模式";
+    for (const option of byId("mode").options) {
+      if (option.value !== "demo") option.disabled = !snapshot.allow_live;
+    }
+    active = snapshot.runs.some((run) => run.status === "running");
+    setMode();
+    renderHistory(snapshot.runs);
+    const selected = selection;
+    if (selected) {
+      const run = await request(`/api/runs/${encodeURIComponent(selected)}`);
+      if (selection === selected) renderRun(run);
+    }
+  } catch (error) {
+    showError(error);
+  } finally {
+    refreshing = false;
+  }
+}
+
+function showRun(id) {
+  selection = id;
+  latest = null;
+  showError();
+  history.replaceState(null, "", id ? `#${id}` : location.pathname);
+  if (!id) {
+    byId("editor").hidden = false;
+    byId("detail").hidden = true;
+  }
+  void refresh();
+}
+
+async function changeRun(path, data) {
+  if (submitting) return;
+  submitting = true;
+  showError();
+  setMode();
+  byId("resume").disabled = true;
+  byId("stop").disabled = true;
+  try {
+    const run = await request(path, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data ?? {}) });
+    showRun(run.id);
+  } catch (error) {
+    showError(error);
+  } finally {
+    submitting = false;
+    byId("resume").disabled = false;
+    byId("stop").disabled = false;
+    setMode();
+  }
+}
+
+byId("compose").addEventListener("click", () => showRun(null));
+byId("mode").addEventListener("change", setMode);
+byId("research-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const mode = byId("mode").value;
+  const data = mode === "demo" ? { mode } : {
+    mode, question: byId("question").value, notes: mode === "local" ? byId("notes").value : "",
+    max_model_calls: Number(byId("budget").value),
+  };
+  void changeRun("/api/runs", data);
+});
+byId("stop").addEventListener("click", () => latest && changeRun(`/api/runs/${latest.id}/stop`));
+byId("resume").addEventListener("click", () => latest && changeRun(`/api/runs/${latest.id}/resume`));
+setMode();
+void refresh();
+setInterval(refresh, 1500);
