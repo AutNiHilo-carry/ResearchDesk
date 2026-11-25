@@ -39,6 +39,16 @@ reviewer身份为自行声明，程序无法证明是谁填写。测试桩只能
 
 不自动修改默认策略、Skill或门槛。一个标注者与模型之间的分歧不是inter-annotator agreement；如需评估标注一致性，应另收集多个独立人工标注并做仲裁。
 
+## 未发布修订稿的复核意见
+
+收到绑定到 `unpublished-candidate-review-v1` 复核包的已填写表后，可以离线导入：
+
+```powershell
+python -m researchdesk.review import-candidate <原评测目录> --dataset <任务集.json> --bundle <候选复核包目录> --candidate <候选正文.md> --review <已填写的表.json> --output <新目录>
+```
+
+导入会从原评测重建复核材料，核对候选正文、冻结要求和来源证据，并检查表格中的事实标签、引用和逐字正文锚点。结果单独保存为对未发布稿的自述意见，原报告和模型评分继续保留。审阅身份和独立性由实际审核流程确认；本命令只检查内容绑定，无外部 API 请求。
+
 ## 同文重评审计
 
 配对实验同时保存comparison-audit.json，检查最终正文哈希、引用评分完整输入哈希及未变正文的标签分歧，避免把相同报告两次评分的波动归因于修订。已有实验可不调用模型补做审计：

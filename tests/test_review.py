@@ -4,7 +4,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 from researchdesk.ledger import Ledger
-from researchdesk.review import build_packet, export_review, import_review, fingerprint
+from researchdesk.review import (build_packet, candidate_packet, export_review, fingerprint,
+                                 import_candidate_review, import_review)
 from researchdesk.task_eval import evaluate_batch, load_taskset
 from researchdesk.verification import VerificationError
 
@@ -111,6 +112,67 @@ def test_changed_evaluation_input_invalidates_review(review_case, tmp_path):
     (run / "draft.md").write_text("Changed report.", encoding="utf-8")
     with pytest.raises(VerificationError, match="changed"):
         submit(review_case, review, tmp_path / "rejected")
+
+
+@pytest.fixture
+def candidate_case(review_case, tmp_path):
+    from researchdesk.delivery import blank_review
+    evaluation, dataset, _ = review_case
+    original, = build_packet(evaluation, dataset)["tasks"]
+    body = original["report"].replace("Document fact.", "Document fact. Scope was clarified.")
+    candidate = tmp_path / "candidate.md"
+    candidate.write_text(body, encoding="utf-8")
+    packet, _ = candidate_packet(original, body)
+    bundle = tmp_path / "candidate-review"
+    bundle.mkdir()
+    packet_hash = fingerprint(packet)
+    (bundle / "packet.json").write_text(json.dumps(dict(sha256=packet_hash, content=packet)), encoding="utf-8")
+    (bundle / "review.json").write_text(json.dumps(blank_review(packet, packet_hash)), encoding="utf-8")
+    submitted = tmp_path / "opinion.json"
+    submitted.write_text(json.dumps(filled_review(bundle)), encoding="utf-8")
+    return evaluation, dataset, bundle, candidate, submitted
+
+
+def test_candidate_opinion_records_only_unpublished_scope(candidate_case, tmp_path, monkeypatch):
+    import socket
+    import sys
+    from researchdesk import review
+    evaluation, dataset, bundle, candidate, submitted = candidate_case
+    before = {p: p.read_bytes() for root in (evaluation, bundle) for p in root.rglob("*") if p.is_file()}
+    output = tmp_path / "recorded"
+    monkeypatch.setattr(sys, "argv", ["review", "import-candidate", str(evaluation), "--dataset", str(dataset),
+        "--bundle", str(bundle), "--candidate", str(candidate), "--review", str(submitted), "--output", str(output)])
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: pytest.fail("Candidate review must stay offline"))
+    assert review.main() == 0
+    result = json.loads((output / "result.json").read_bytes())
+    assert result["publication"] == "unpublished" and result["independent_review"] == "not_verified"
+    assert result["rubric"]["rubric_passed"] and result["quality"]["citation_precision"] == 1.0
+    assert (output / "submitted-review.json").read_bytes() == submitted.read_bytes()
+    assert before == {p: p.read_bytes() for root in (evaluation, bundle) for p in root.rglob("*") if p.is_file()}
+
+
+@pytest.mark.parametrize("problem", ["blank", "changed_body", "source_quote", "wrong_anchor"])
+def test_candidate_import_rejects_mismatched_material_or_opinions(candidate_case, tmp_path, problem):
+    evaluation, dataset, bundle, candidate, submitted = candidate_case
+    if problem == "blank":
+        submitted = bundle / "review.json"
+    elif problem == "changed_body":
+        candidate.write_bytes(candidate.read_bytes() + b" changed")
+    elif problem == "source_quote":
+        path = bundle / "packet.json"
+        envelope = json.loads(path.read_bytes())
+        evidence = envelope["content"]["tasks"][0]["evidence"]
+        next(iter(evidence.values()))["snippet"] = "Modified evidence."
+        envelope["sha256"] = fingerprint(envelope["content"])
+        path.write_text(json.dumps(envelope), encoding="utf-8")
+    else:
+        opinion = json.loads(submitted.read_bytes())
+        opinion["tasks"][0]["criteria"][0]["report_quote"] = "Absent phrase."
+        submitted.write_text(json.dumps(opinion), encoding="utf-8")
+    output = tmp_path / "rejected"
+    with pytest.raises((VerificationError, ValidationError)):
+        import_candidate_review(evaluation, dataset, bundle, candidate, submitted, output)
+    assert not output.exists()
 
 
 def test_transfer_cases_have_same_thresholds_and_new_task_ids():

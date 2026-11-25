@@ -153,27 +153,41 @@ class HumanReview(BaseModel):
     tasks: list[ReviewedTask]
 
 
-def import_review(evaluation, dataset, bundle, review_path, output):
-    envelope = json.loads((bundle / "packet.json").read_text(encoding="utf-8"))
-    packet = build_packet(evaluation, dataset)
-    if envelope["sha256"] != fingerprint(envelope["content"]) or envelope["content"] != packet:
-        raise VerificationError("Review packet or underlying evaluation inputs changed.")
+def read_submission(review_path, packet_hash, tasks):
     raw_review = review_path.read_text(encoding="utf-8")
     review = HumanReview.model_validate(json.loads(raw_review))
-    if review.schema_version != 1 or review.packet_sha256 != envelope["sha256"] or not review.reviewer.strip():
+    if review.schema_version != 1 or review.packet_sha256 != packet_hash or not review.reviewer.strip():
         raise VerificationError("Review identity or packet binding is invalid.")
     stamp = datetime.fromisoformat(review.reviewed_at.replace("Z", "+00:00"))
     if stamp.utcoffset() is None:
         raise VerificationError("Review timestamp must include a timezone.")
-    completed = {row["task_id"]: row for row in packet["tasks"] if row["generation_status"] == "completed"}
     ids = [row.task_id for row in review.tasks]
-    if set(ids) != set(completed) or len(ids) != len(completed):
+    if set(ids) != set(tasks) or len(ids) != len(tasks):
         raise VerificationError("Review must label every completed task exactly once.")
     for task in review.tasks:
         reasons = ([row.reason for row in task.units] + [link.reason for row in task.units for link in row.links]
                    + [row.reason for row in task.criteria])
         if any(not reason.strip() for reason in reasons):
             raise VerificationError("Human review reasons must not be blank.")
+    return review, raw_review
+
+
+def assess_submission(task, reference):
+    payload, _ = prepare(reference["units"], reference["evidence"], reference["sources"])
+    quality = assess(payload, lambda _: {"units": [row.model_dump() for row in task.units]})
+    grades = grade_tasks({"tasks": [dict(task_id=task.task_id, report=reference["report"],
+        criteria=reference["criteria"])]}, lambda _: {"tasks": [dict(task_id=task.task_id,
+            criteria=[row.model_dump() for row in task.criteria])]})[task.task_id]
+    return grades, quality
+
+
+def import_review(evaluation, dataset, bundle, review_path, output):
+    envelope = json.loads((bundle / "packet.json").read_text(encoding="utf-8"))
+    packet = build_packet(evaluation, dataset)
+    if envelope["sha256"] != fingerprint(envelope["content"]) or envelope["content"] != packet:
+        raise VerificationError("Review packet or underlying evaluation inputs changed.")
+    completed = {row["task_id"]: row for row in packet["tasks"] if row["generation_status"] == "completed"}
+    review, raw_review = read_submission(review_path, envelope["sha256"], completed)
     # Bind the exact model data used below to the packet just validated.
     raw_result = (evaluation / "result.json").read_text(encoding="utf-8")
     if digest(raw_result) != packet["result_sha256"]:
@@ -188,11 +202,7 @@ def import_review(evaluation, dataset, bundle, review_path, output):
     reviewed, differences = [], []
     for task in review.tasks:
         reference = completed[task.task_id]
-        payload, _ = prepare(reference["units"], reference["evidence"], reference["sources"])
-        quality = assess(payload, lambda _: {"units": [row.model_dump() for row in task.units]})
-        grades = grade_tasks({"tasks": [dict(task_id=task.task_id, report=reference["report"],
-            criteria=reference["criteria"])]}, lambda _: {"tasks": [dict(task_id=task.task_id,
-                criteria=[row.model_dump() for row in task.criteria])]})[task.task_id]
+        grades, quality = assess_submission(task, reference)
         metrics = quality_metrics(quality["units"])
         success = task_success(dict(generation_status="completed", generation_metrics=dict(
             provider_requests=reference["provider_requests"])), grades, metrics, packet["thresholds"])
@@ -231,26 +241,91 @@ def import_review(evaluation, dataset, bundle, review_path, output):
     return outcome
 
 
+def candidate_packet(material, body):
+    if "```" in body or "~~~" in body:
+        raise VerificationError("Candidate contains prose outside the review unit contract.")
+    task_id = material["task_id"]
+    units = split_units(body)
+    for unit in units:
+        unit["unit_id"] = task_id + ":" + unit["unit_id"]
+    reference = dict(material, report=body, units=units)
+    evidence = {eid: {key: row[key] for key in ("source_id", "snippet")}
+                for eid, row in material["evidence"].items()}
+    sources = {sid: dict(location=Path(row["location"]).name, content=row["content"])
+               for sid, row in material["sources"].items()}
+    display = dict(task_id=task_id, question=material["question"], criteria=material["criteria"],
+                   report=body, units=units, evidence=evidence, sources=sources, generation_status="completed")
+    packet = dict(version="unpublished-candidate-review-v1", publication="unpublished",
+                  candidate_body_sha256=digest(body), tasks=[display])
+    return packet, reference
+
+
+def import_candidate_review(evaluation, dataset, bundle, candidate_path, review_path, output):
+    """Bind opinions to the unpublished body and original corpus, separately from scored reports."""
+    output = output.resolve()
+    if any(output.is_relative_to(path.resolve()) for path in (evaluation, bundle)):
+        raise VerificationError("Review output must be outside the underlying evaluation and review bundle.")
+    packet_path = bundle / "packet.json"
+    frozen = packet_path.read_bytes()
+    envelope = json.loads(frozen)
+    declared, = envelope["content"]["tasks"]
+    original = build_packet(evaluation, dataset)
+    materials = [row for row in original["tasks"] if row["task_id"] == declared["task_id"]
+                 and row["generation_status"] == "completed"]
+    if len(materials) != 1:
+        raise VerificationError("Candidate requires one matching completed source task.")
+    body = candidate_path.read_text(encoding="utf-8")
+    packet, reference = candidate_packet(materials[0], body)
+    packet_hash = fingerprint(packet)
+    if envelope["content"] != packet or envelope["sha256"] != packet_hash:
+        raise VerificationError("Candidate body, review packet or source evidence changed.")
+    review, raw_review = read_submission(review_path, packet_hash, [reference["task_id"]])
+    task, = review.tasks
+    grades, quality = assess_submission(task, reference)
+    if (packet_path.read_bytes() != frozen or candidate_path.read_text(encoding="utf-8") != body
+            or build_packet(evaluation, dataset) != original):
+        raise VerificationError("Candidate review inputs changed while checking the submission.")
+    result = dict(version="unpublished-candidate-review-result-v1", status="human_review_recorded",
+                  reviewer=review.reviewer, reviewed_at=review.reviewed_at, task_id=task.task_id,
+                  packet_sha256=packet_hash, review_sha256=digest(raw_review),
+                  candidate_body_sha256=packet["candidate_body_sha256"], source_packet_sha256=fingerprint(original),
+                  rubric=grades, quality=quality_metrics(quality["units"]), units=quality["units"],
+                  identity="self_declared_not_authenticated", independent_review="not_verified",
+                  publication="unpublished", promotion="no_automatic_promotion", api_requests=0)
+    output.mkdir(parents=True, exist_ok=False)
+    atomic_text(output / "submitted-review.json", raw_review)
+    atomic_text(output / "result.json", json.dumps(result, ensure_ascii=False, indent=2))
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description="Offline, human-declared research review")
-    parser.add_argument("action", choices=["export", "import"])
+    parser.add_argument("action", choices=["export", "import", "import-candidate"])
     parser.add_argument("evaluation", type=Path)
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--bundle", type=Path)
     parser.add_argument("--review", type=Path)
+    parser.add_argument("--candidate", type=Path)
     args = parser.parse_args()
     try:
+        if (args.action == "import-candidate") != (args.candidate is not None):
+            parser.error("--candidate is required for import-candidate only")
         if args.action == "export":
             if args.bundle or args.review:
                 parser.error("export does not accept --bundle/--review")
             export_review(args.evaluation.resolve(), args.dataset, args.output)
             print(f"Pending human review: {args.output}; no human score assigned.")
-        else:
+        elif args.action == "import":
             if not args.bundle or not args.review:
                 parser.error("import requires --bundle and --review")
             result = import_review(args.evaluation.resolve(), args.dataset, args.bundle, args.review, args.output)
             print(f"Human-declared review recorded: {args.output}; disagreements: {len(result['disagreements'])}")
+        else:
+            if not args.bundle or not args.review:
+                parser.error("import-candidate requires --bundle and --review")
+            import_candidate_review(args.evaluation, args.dataset, args.bundle, args.candidate, args.review, args.output)
+            print(f"Candidate review recorded: {args.output}; zero API requests.")
         return 0
     except Exception as error:
         print(f"Review failed ({type(error).__name__}). No accepted human result written.")
