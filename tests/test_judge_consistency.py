@@ -1,6 +1,7 @@
 import json
 import pytest
 from researchdesk.judge_consistency import compare, fingerprint
+from researchdesk.verification import assess, digest
 
 
 @pytest.fixture
@@ -85,3 +86,71 @@ def test_cases_hash_binds_parsed_snapshot_when_file_changes(data, monkeypatch, c
     assert result["compared_pairs"] == 1
     assert result["pairs"][0]["id"] == "P1"
     assert result["factual_disagreements"] == 1
+
+
+@pytest.fixture
+def grouped(tmp_path):
+    paths = [tmp_path / name for name in ("left.json", "right.json", "groups.json")]
+    left = ["备份无阻塞暂难保证；摘记未做停电试验。"]
+    right = ["备份无阻塞暂难保证。", "摘记未做停电试验。"]
+    prompt_hash = "b" * 64
+
+    def freeze(path, texts, labels):
+        evidence_id = "E" + "1" * 16
+        units = [dict(unit_id=f"U{i}", line=i, text=text, citations=[evidence_id])
+                 for i, text in enumerate(texts, 1)]
+        payload = dict(units=units, evidence=[{"evidence_id": evidence_id, "integrity": "valid"}])
+
+        def judge(_):
+            return dict(units=[dict(unit_id=unit["unit_id"], factual=factual, reason="fixture",
+                         links=[dict(evidence_id=evidence_id, verdict=verdict, reason="fixture")])
+                         for unit, (factual, verdict) in zip(units, labels, strict=True)])
+
+        judge.prompt_sha256 = prompt_hash
+        judge.prompt_version = "fixture"
+        cache = dict(prompt_sha256=prompt_hash, payload=payload, result=assess(payload, judge),
+                     input_sha256=digest(json.dumps(payload, ensure_ascii=False, sort_keys=True)))
+        path.write_text(json.dumps(cache), encoding="utf-8")
+        return [{key: unit[key] for key in ("unit_id", "text")} for unit in units]
+
+    left_anchors = freeze(paths[0], left, [(False, "not_applicable")])
+    right_anchors = freeze(paths[1], right, [(True, "partial"), (False, "not_applicable")])
+    cases = dict(version="judge-consistency-groups-v1", relation="declared_rewrite_not_verified_equivalence",
+                 left_sha256=fingerprint(paths[0]), right_sha256=fingerprint(paths[1]),
+                 groups=[dict(id="G1", left=left_anchors, right=right_anchors)])
+    paths[2].write_text(json.dumps(cases), encoding="utf-8")
+    return paths, cases
+
+
+def test_group_retains_one_to_many_labels_and_denominator_change(grouped):
+    paths, _ = grouped
+    before = [path.read_bytes() for path in paths]
+    result = compare(*paths)
+    group, = result["groups"]
+    assert [row["factual"] for row in group["left"]] == [False]
+    assert [row["factual"] for row in group["right"]] == [True, False]
+    assert group["right"][0]["links"][0]["verdict"] == "partial"
+    assert (group["factual_units_delta"], group["covered_units_delta"]) == (1, 0)
+    assert result["compared_groups"] == 1 and result["accuracy"] is None and result["api_calls"] == 0
+    assert [path.read_bytes() for path in paths] == before
+
+
+@pytest.mark.parametrize("mutation", ["anchor", "duplicate_unit", "unbound_payload", "tampered_metrics"])
+def test_group_rejects_inconsistent_bindings(grouped, mutation):
+    paths, cases = grouped
+    group = cases["groups"][0]
+    if mutation == "anchor":
+        group["right"][0]["text"] = "Changed text"
+    elif mutation == "duplicate_unit":
+        group["right"].append(group["right"][0])
+    else:
+        cache = json.loads(paths[1].read_text(encoding="utf-8"))
+        if mutation == "unbound_payload":
+            cache["payload"]["units"][0]["text"] = "Mismatched input"
+        else:
+            cache["result"]["metrics"]["covered_units"] = 1
+        paths[1].write_text(json.dumps(cache), encoding="utf-8")
+        cases["right_sha256"] = fingerprint(paths[1])
+    paths[2].write_text(json.dumps(cases), encoding="utf-8")
+    with pytest.raises(ValueError):
+        compare(*paths)
