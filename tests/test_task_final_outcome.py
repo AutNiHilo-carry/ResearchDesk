@@ -6,7 +6,8 @@ from langchain_core.messages import AIMessage
 from researchdesk import cli,recovery,task_eval
 from researchdesk.final_body_gate import verify_rejection
 from researchdesk.storage import RecoveryError
-from test_task_eval import task_data
+from researchdesk.tools import ResearchTools
+from test_task_eval import EvidenceJudge, RubricJudge, task_data
 
 
 @pytest.fixture
@@ -136,3 +137,73 @@ def test_runtime_policy_or_exit_contradictions_are_not_accepted(tmp_path,runner,
         return dict(result,returncode=0) if change=='successful_exit' else result
     monkeypatch.setattr(task_eval,'run_command',command)
     assert task_eval.run_task(task,paths,tmp_path/'task',240)['generation_status']=='invalid_artifacts'
+
+
+@pytest.mark.parametrize('options', [
+    {'reuse_checked_draft_on_overflow': 'true'},
+    {'reuse_checked_draft_on_overflow': True, 'final_body_limit': 200},
+    {'reuse_checked_draft_on_overflow': True, 'draft_inspection_limit': 200},
+])
+def test_invalid_overflow_configuration_rejected_before_generation(tmp_path, options):
+    with pytest.raises(ValueError, match='Overflow fallback'):
+        task_eval.run_task(dict(id='sample', question='q', **options), [], tmp_path / 'task', 240)
+    assert not (tmp_path / 'task').exists()
+
+
+@pytest.mark.parametrize('mode', ['final_candidate', 'checked_draft'])
+def test_batch_records_and_rechecks_completed_publication_path(tmp_path, runner, monkeypatch, mode):
+    from researchdesk.review import build_packet
+
+    def graph(ledger, initial, limits, model_name, *, allowed_tools):
+        source = next(iter(ledger.sources.values()))
+        quote = source['content'].splitlines()[0]
+        evidence = ledger.add_evidence('Fixture fact.', source['id'], quote)
+        citation = f"[{evidence['id']}]"
+        checked = f'Fixture fact. {citation}'
+        tools = ResearchTools(ledger, '', allowed_tools=allowed_tools)
+        result = tools.executor.execute('inspect_report', {'report': checked})
+        assert result['body_constraints']['passed']
+        final = checked if mode == 'final_candidate' else '长' * 201 + citation
+        return {'messages': [AIMessage(content=final)]}
+
+    monkeypatch.setattr(recovery, 'run_graph', graph)
+    data, tasks, documents = task_data()
+    selected = dict(tasks[0], draft_inspection_limit=200, final_body_limit=200,
+                    reuse_checked_draft_on_overflow=True)
+    evaluation = tmp_path / 'evaluation'
+    scored_reports = []
+
+    def rubric(payload):
+        scored_reports.extend(row['report'] for row in payload['tasks'])
+        return RubricJudge()(payload)
+
+    result = task_eval.evaluate_batch(data, [selected], documents, evaluation, model_name='fixture',
+                                      task_judge=rubric, evidence_judge=EvidenceJudge())
+    row, = result['tasks']
+    assert row['generation_status'] == 'completed'
+    assert row['publication_path']['mode'] == mode
+    assert row['final_body_policy']['overflow_policy'] == 'reuse-checked-draft-v1'
+    run = Path(row['run_directory'])
+    assert scored_reports == [(run / 'draft.md').read_text(encoding='utf-8')]
+    report = task_eval.summary(result)
+    if mode == 'checked_draft':
+        assert row['publication_path']['selection'] == json.loads(
+            (run / 'overflow-selection.json').read_text(encoding='utf-8'))
+        assert '复用通过预检的草稿' in report
+    else:
+        assert row['publication_path'] == {'mode': 'final_candidate'}
+        assert '直接发布通过检查的最终稿' in report
+
+    dataset = Path(__file__).parents[1] / 'evals' / 'research-tasks-v1.json'
+    build_packet(evaluation, dataset)
+    if mode == 'checked_draft':
+        path = run / 'overflow-candidate.md'
+        original = path.read_bytes()
+        path.write_text('tampered', encoding='utf-8')
+        with pytest.raises(RecoveryError):
+            build_packet(evaluation, dataset)
+        path.write_bytes(original)
+    row.pop('publication_path')
+    (evaluation / 'result.json').write_text(json.dumps(result), encoding='utf-8')
+    with pytest.raises(ValueError, match='Saved publication path'):
+        build_packet(evaluation, dataset)

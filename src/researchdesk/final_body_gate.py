@@ -156,6 +156,7 @@ def verify_completed(directory):
                 or checked_fallback(normalize_citation_delimiters(candidate), evidence, sources, spec, checks) != report
                 or selection != selection_receipt(candidate, report) or metadata.get('overflow_selection') != selection):
             raise RecoveryError('Completed draft selection differs from its receipt.')
+        return selection
 
 
 def verify_rejection(directory):

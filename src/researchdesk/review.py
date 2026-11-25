@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 from .storage import atomic_text
-from .task_eval import load_taskset, quality_metrics, task_success
+from .task_eval import load_taskset, quality_metrics, task_success, verify_publication_path
 from .task_grading import CriterionGrade, grade_tasks
 from .verification import (UnitJudgment, VerificationError, assess, digest, load_run, prepare, split_units)
 
@@ -56,7 +56,8 @@ def build_packet(evaluation, dataset):
             run = (evaluation / "tasks" / task_id / "research" / name).resolve()
             if not run.is_relative_to(evaluation):
                 raise VerificationError("Research run escapes evaluation directory.")
-            report, found_evidence, found_sources, _ = load_run(run)
+            report, found_evidence, found_sources, manifest = load_run(run)
+            verify_publication_path(run, record, manifest)
             if "```" in report or "~~~" in report:
                 raise VerificationError("Fenced text needs a different review granularity; refusing omissions.")
             rows = split_units(report)

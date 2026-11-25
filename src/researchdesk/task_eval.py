@@ -136,10 +136,16 @@ def run_task(task, paths, directory, timeout):
     if task.get('draft_inspection_limit') is not None:
         from .draft_inspection import policy_spec
         inspection = policy_spec(task['draft_inspection_limit'], final_turn=final_turn)
+    final_limit = task.get('final_body_limit')
+    reuse_draft = task.get('reuse_checked_draft_on_overflow', False)
+    if type(reuse_draft) is not bool:
+        raise VerificationError('Overflow fallback must be a boolean.')
+    if reuse_draft and (inspection is None or final_limit is None):
+        raise VerificationError('Overflow fallback requires draft inspection and a final body limit.')
     final_policy = None
-    if task.get('final_body_limit') is not None:
+    if final_limit is not None:
         from .final_body_gate import policy_spec as final_spec
-        final_policy=final_spec(task['final_body_limit'])
+        final_policy = final_spec(final_limit, reuse_checked_draft=reuse_draft)
     directory.mkdir(parents=True, exist_ok=False)
     research = directory / "research"
     command = [sys.executable, "-m", "researchdesk.cli", question, "--local-only",
@@ -157,6 +163,8 @@ def run_task(task, paths, directory, timeout):
         command.append('--draft-inspection-final-turn')
     if final_policy is not None:
         command.extend(['--final-body-limit',str(final_policy['constraint_policy']['max_chars'])])
+    if reuse_draft:
+        command.append('--reuse-checked-draft-on-overflow')
     for path in paths:
         command.extend(["--document", str(path)])
     environment = os.environ.copy()
@@ -185,7 +193,10 @@ def run_task(task, paths, directory, timeout):
                     from .final_body_gate import verify_completed,verify_rejection
                     if manifest.get('final_body_policy')!=final_policy:
                         raise VerificationError('Runtime final body policy differs from the task.')
-                    if status=='completed': verify_completed(run)
+                    if status == 'completed':
+                        selection = verify_completed(run)
+                        if reuse_draft:
+                            record['publication_path'] = publication_path(selection)
                     elif not outcome['timed_out'] and manifest.get('error_type')=='FinalBodyRejected':
                         if outcome['returncode']==0:
                             raise VerificationError('Rejected publication cannot have a successful process exit.')
@@ -200,6 +211,26 @@ def run_task(task, paths, directory, timeout):
                     record['error_type']=type(error).__name__
     record["generation_status"] = status
     return record
+
+
+def publication_path(selection):
+    if selection is None:
+        return dict(mode='final_candidate')
+    return dict(mode='checked_draft', selection=selection)
+
+
+def verify_publication_path(run, record, manifest):
+    """Recheck opted-in provenance against the actual run before reusing its scores."""
+    recorded_policy = record.get('final_body_policy') or {}
+    actual_policy = manifest.get('final_body_policy') or {}
+    if ('overflow_policy' not in recorded_policy and 'overflow_policy' not in actual_policy
+            and 'publication_path' not in record and manifest.get('overflow_selection') is None):
+        return
+    from .final_body_gate import verify_completed
+    if recorded_policy != actual_policy or 'overflow_policy' not in actual_policy:
+        raise VerificationError('Saved overflow publication policy changed.')
+    if record.get('publication_path') != publication_path(verify_completed(run)):
+        raise VerificationError('Saved publication path differs from the verified research run.')
 
 
 def normalized_candidate(run):
@@ -324,8 +355,12 @@ def evaluate_batch(data, tasks, documents, artifact, *, runner=run_task, model_n
         try:
             if record.get("model") != model_name:
                 raise VerificationError("Generator model differs from the frozen evaluation configuration.")
-            report, evidence, sources, manifest = load_run(Path(record["run_directory"]))
+            run = Path(record["run_directory"])
+            report, evidence, sources, manifest = load_run(run)
             task = task_map[record['task_id']]
+            if task.get('reuse_checked_draft_on_overflow') and 'publication_path' not in record:
+                raise VerificationError('Missing publication path for the requested overflow policy.')
+            verify_publication_path(run, record, manifest)
             if task.get('generation_contract', 'legacy') != 'legacy':
                 expected_question = task['question'] + task_suffix(task)
                 if (record.get('generation_contract') != contracts[task['id']]
@@ -439,6 +474,15 @@ def summary(result, *, quality_details=False):
             check = row['constraints']
             counts.append(f"Body count {row['task_id']}: {check.get('counted_chars')}/200 Unicode codepoints; policy body-length-v1.")
     lines += [''] + counts
+    verified_paths = [row for row in result['tasks'] if row.get('generation_status') == 'completed'
+                      and isinstance(row.get('publication_path'), dict)]
+    if verified_paths:
+        lines += ['', '## 已发布正文的来源', '']
+        for row in verified_paths:
+            mode = row['publication_path'].get('mode')
+            label = {'checked_draft': '最终稿超长，复用通过预检的草稿',
+                     'final_candidate': '直接发布通过检查的最终稿'}.get(mode, '来源未知')
+            lines.append(f"- {row['task_id']} — {label}")
     rejected=[row for row in result['tasks'] if row.get('generation_status')=='publication_rejected']
     if rejected:
         lines+=['','## 最终发布被拒绝','']
