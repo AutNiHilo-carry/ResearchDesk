@@ -72,9 +72,10 @@
             <div id="report" class="prose"></div>
           </article>
           <aside class="surface evidence" aria-labelledby="evidence-title">
-            <h2 id="evidence-title">引用证据</h2>
+            <h2 id="evidence-title" tabindex="-1">引用证据</h2>
             <p id="evidence-prompt" class="muted">选择报告中的引用，查看对应摘录和来源。</p>
-            <div id="evidence-content" aria-live="polite" hidden>
+            <div id="evidence-content" hidden>
+              <button id="back-to-citation" class="secondary" type="button">返回报告引用</button>
               <p id="evidence-id" class="run-id"></p>
               <h3 id="source-title"></h3>
               <blockquote id="snippet"></blockquote>

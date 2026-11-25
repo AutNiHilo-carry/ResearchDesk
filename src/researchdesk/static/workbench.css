@@ -102,6 +102,8 @@ input[type="number"] { width: 8rem; }
 }
 .citation[aria-pressed="true"], .citation:hover { background: #cae8d8; border-color: #7aa890; }
 .evidence h3 { overflow-wrap: anywhere; }
+#evidence-title { scroll-margin-top: 1rem; }
+#back-to-citation { margin-bottom: .9rem; font-size: .875rem; }
 blockquote { margin: .8rem 0; padding: .65rem .8rem; border-left: 3px solid #669d84; background: #f0f7f3; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 a { color: #1e654e; text-underline-offset: 3px; }
 .location { overflow-wrap: anywhere; }

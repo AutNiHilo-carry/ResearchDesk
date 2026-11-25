@@ -15,6 +15,7 @@ const messages = {
 let selection = location.hash.slice(1) || null;
 let latest = null;
 let renderedReport = null;
+let activeCitation = null;
 let renderedHistory = null;
 let refreshing = false;
 let submitting = false;
@@ -76,9 +77,9 @@ function renderHistory(records) {
 }
 
 function showEvidence(id, evidence, button) {
-  for (const citation of document.querySelectorAll(".citation")) {
-    citation.setAttribute("aria-pressed", String(citation === button));
-  }
+  activeCitation?.setAttribute("aria-pressed", "false");
+  activeCitation = button;
+  button.setAttribute("aria-pressed", "true");
   byId("evidence-prompt").hidden = true;
   byId("evidence-content").hidden = false;
   byId("evidence-id").textContent = id;
@@ -88,13 +89,16 @@ function showEvidence(id, evidence, button) {
   const link = byId("source-link");
   link.hidden = !/^https?:\/\//i.test(evidence.location || "");
   if (!link.hidden) link.href = evidence.location;
-  if (matchMedia("(max-width: 990px)").matches) byId("evidence-title").scrollIntoView({ block: "nearest" });
+  const heading = byId("evidence-title");
+  heading.focus({ preventScroll: true });
+  heading.scrollIntoView({ block: "start", inline: "nearest" });
 }
 
 function renderReport(run) {
   const key = JSON.stringify([run.id, run.report, run.evidence, run.status, run.exit_code, run.error_type]);
   if (key === renderedReport) return;
   renderedReport = key;
+  activeCitation = null;
   byId("evidence-prompt").hidden = false;
   byId("evidence-content").hidden = true;
   const report = byId("report");
@@ -119,6 +123,7 @@ function renderReport(run) {
     citation.textContent = id;
     citation.setAttribute("aria-label", `查看引用 ${id}`);
     citation.setAttribute("aria-pressed", "false");
+    citation.setAttribute("aria-controls", "evidence-content");
     citation.addEventListener("click", () => showEvidence(id, evidence, citation));
     return citation;
   });
@@ -200,6 +205,7 @@ async function changeRun(path, data) {
   }
 }
 
+byId("back-to-citation").addEventListener("click", () => activeCitation?.focus());
 byId("compose").addEventListener("click", () => showRun(null));
 byId("mode").addEventListener("change", setMode);
 byId("research-form").addEventListener("submit", (event) => {
