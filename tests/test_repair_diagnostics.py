@@ -127,6 +127,8 @@ def test_length_rejection_without_candidate_labels_stays_unscored(source_run,tmp
     assert result['candidate_metrics'] is None
     assert all(r['saved_label'] is None for r in result['candidate_units'])
     assert result['candidate_body_constraints']['status']=='failed'
+    assert result['factuality_check']['status']=='unknown'
+    assert result['factuality_check']['reasons']==['requires_both_saved_assessments']
 
 
 def test_cli_creates_new_view_without_credentials_or_overwrite(source_run,tmp_path,monkeypatch):
@@ -176,3 +178,59 @@ def test_cli_refuses_to_write_a_view_into_the_original_run(source_run,tmp_path,m
     with pytest.raises(SystemExit) as error:
         diagnostic.main()
     assert error.value.code==2 and snapshot(directory)==before
+
+
+def test_factuality_gate_flags_an_apparent_gain_from_excluding_an_unchanged_fact(source_run, tmp_path, monkeypatch):
+    source, _, _, report, feedback = source_run
+
+    class Reclassify(Checker):
+        def __call__(self, payload):
+            result = super().__call__(payload)
+            changed = result['units'][0]
+            changed['factual'] = False
+            for link in changed['links']:
+                link['verdict'] = 'not_applicable'
+            return result
+
+    labels = Reclassify()
+    labels.prompt_sha256 = digest(SYSTEM_PROMPT_V2)
+    labels.prompt_version = 'report-quote-v2'
+    # Reorder the old lines to exercise content identity rather than the position-derived ID.
+    revised = '\n'.join(reversed(report.splitlines()))
+    directory = tmp_path / 'repair'
+    saved = repair.repair_run(source, directory, feedback_rows=feedback, checker=labels,
+        graph_runner=lambda *a, **k: dict(messages=[AIMessage(content=revised)]))
+    assert saved['selection']['accepted'] and saved['selection']['selected'] == 'candidate'
+    before = snapshot(directory)
+    monkeypatch.setattr(repair, 'ModelJudge', lambda *a, **k: pytest.fail('No API calls'))
+    output = tmp_path / 'diagnostic'
+    monkeypatch.setattr(sys, 'argv', [
+        'repair_diagnostics', str(directory), '--gate', 'factuality', '--output', str(output),
+    ])
+    assert diagnostic.main() == 3
+    gate = json.loads((output / 'gate.json').read_text(encoding='utf-8'))
+    assert gate['status'] == 'review_required' and gate['exit_code'] == 3
+    assert gate['reasons'] == ['unchanged_unit_factuality_changed']
+    assert gate['ratio_increases_with_smaller_denominator'] == ['citation_precision', 'evidence_coverage']
+    assert gate['matched_units'] == 2
+    change, = gate['changes']
+    assert (change['original_unit'], change['candidate_unit']) == ('U2', 'U1')
+    assert (change['original_factual'], change['candidate_factual']) == (True, False)
+    assert snapshot(directory) == before
+
+
+@pytest.mark.parametrize(('candidate', 'status', 'reason'), [
+    ('事实B。[{b}]', 'passed', None),
+    ('事实B。[{a}]', 'unknown', 'no_unique_unchanged_units'),
+    ('事实B。[{b}]\n事实B。[{b}]', 'unknown', 'ambiguous_unchanged_units'),
+])
+def test_exact_match_uses_evidence_and_refuses_ambiguous_repeated_rows(source_run, tmp_path, candidate, status, reason):
+    directory, _, _ = build(source_run, tmp_path, lambda a, b: candidate.format(a=a, b=b))
+    result = diagnostic.diagnose(directory)['factuality_check']
+    assert result['status'] == status
+    assert result['changes'] == []
+    if reason:
+        assert reason in result['reasons']
+        assert result['matched_units'] == 0
+    else:
+        assert result['matched_units'] == 1

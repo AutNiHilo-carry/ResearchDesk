@@ -1,5 +1,6 @@
 """Read-only citation changes and saved-label gaps, never automatic evidence transfer."""
 import argparse
+from collections import defaultdict
 import json
 import hashlib
 from pathlib import Path
@@ -40,6 +41,59 @@ def saved_labels(raw, units, evidence, sources):
     if canonical(dict(units=checked['units'],metrics=checked['metrics']))!=canonical(dict(units=saved['units'],metrics=saved['metrics'])):
         raise VerificationError('Saved repair rows, coverage or metrics are inconsistent.')
     return checked
+
+
+def factuality_check(original, candidate):
+    """Compare uniquely identifiable unchanged rows using already validated labels."""
+    view = dict(status='unknown', reasons=[], matched_units=0, changes=[], ambiguous=[],
+                ratio_increases_with_smaller_denominator=[], scope='exact_text_and_evidence_ids',
+                human_review='pending', api_requests=0)
+    if original is None or candidate is None:
+        view['reasons'].append('requires_both_saved_assessments')
+        return view
+
+    def index(result):
+        rows = defaultdict(list)
+        for row in result['units']:
+            rows[(row['text'], tuple(row['citations']))].append(row)
+        return rows
+
+    old, new = index(original), index(candidate)
+    for key, left in old.items():
+        if key not in new:
+            continue
+        right = new[key]
+        if len(left) != 1 or len(right) != 1:
+            view['ambiguous'].append(dict(original_units=[r['unit_id'] for r in left],
+                                          candidate_units=[r['unit_id'] for r in right]))
+            continue
+        before, after = left[0], right[0]
+        view['matched_units'] += 1
+        if before['factual'] != after['factual']:
+            view['changes'].append(dict(text=before['text'], citations=before['citations'],
+                original_unit=before['unit_id'], candidate_unit=after['unit_id'],
+                original_factual=before['factual'], candidate_factual=after['factual']))
+
+    if any(change['original_factual'] for change in view['changes']):
+        before, after = original['metrics'], candidate['metrics']
+        for ratio, numerator, denominator in (
+            ('citation_precision', 'supported_links', 'citation_links'),
+            ('evidence_coverage', 'covered_units', 'factual_units'),
+        ):
+            if (before[ratio] is not None and after[ratio] is not None and after[ratio] > before[ratio]
+                    and after[denominator] < before[denominator] and after[numerator] <= before[numerator]):
+                view['ratio_increases_with_smaller_denominator'].append(ratio)
+
+    if view['ambiguous']:
+        view['reasons'].append('ambiguous_unchanged_units')
+    if not view['matched_units']:
+        view['reasons'].append('no_unique_unchanged_units')
+    if view['changes']:
+        view['reasons'].append('unchanged_unit_factuality_changed')
+        view['status'] = 'review_required'
+    elif not view['reasons']:
+        view['status'] = 'passed'
+    return view
 
 
 def _diagnose_snapshot(directory):
@@ -96,6 +150,7 @@ def _diagnose_snapshot(directory):
         candidate_quality_status='validated_saved_labels' if new_quality else 'not_available',
         original_metrics=old_quality['metrics'] if old_quality else None,
         candidate_metrics=new_quality['metrics'] if new_quality else None,
+        factuality_check=factuality_check(old_quality,new_quality),
         original_body_constraints=state.get('original_body_constraints'),
         candidate_body_constraints=state.get('candidate_body_constraints'),
         saved_selection=state.get('selection'),inventory=inventory,original_units=rows,
@@ -168,6 +223,14 @@ def markdown(result):
     def literal(text):
         return ['    '+line for line in text.splitlines()]+['']
     lines+=['保存的修订选择（不重新验收）：','']+literal(canonical(result['saved_selection']))
+    check = result.get('factuality_check')
+    if check:
+        lines += [f"未改原文与引用的事实性检查：{check['status']}，匹配 {check['matched_units']} 行。",
+                  f"标签变化 {len(check['changes'])} 行，歧义 {len(check['ambiguous'])} 组。", '']
+        for change in check['changes']:
+            lines += [f"原稿 {change['original_unit']} → 候选 {change['candidate_unit']}，"
+                      f"factual {change['original_factual']} → {change['candidate_factual']}", '']
+            lines += literal(change['text'])
     if result['inventory'] is not None:
         inventory=result['inventory']
         lines+=['候选全文不再引用的编号（不等于事实已删除）：'+', '.join(inventory['disappeared_ids']), '']
@@ -198,6 +261,7 @@ def main():
     parser=argparse.ArgumentParser(description='Offline repair citation diagnostics; no scoring or automatic fixes')
     parser.add_argument('run',type=Path)
     parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--gate',choices=['factuality'],help='Exit 3 for changed or unavailable exact-row factual labels')
     args=parser.parse_args()
     if args.output.resolve().is_relative_to(args.run.resolve()):
         parser.error('Diagnostic output must be outside the source run.')
@@ -206,6 +270,14 @@ def main():
         args.output.mkdir(parents=True,exist_ok=False)
         atomic_text(args.output/'diagnostic.json',json.dumps(result,ensure_ascii=False,indent=2))
         atomic_text(args.output/'summary.md',markdown(result))
+        if args.gate == 'factuality':
+            check = result['factuality_check']
+            exit_code = 0 if check['status'] == 'passed' else 3
+            gate = dict(version='repair-factuality-gate-v1', gate='factuality',
+                        **check, bindings=result['bindings'], exit_code=exit_code)
+            atomic_text(args.output/'gate.json',json.dumps(gate,ensure_ascii=False,indent=2))
+            print(f"Repair factuality gate: {check['status']}; zero API: {args.output}")
+            return exit_code
         print(f'Repair diagnostic only; zero API; human review pending: {args.output}')
         return 0
     except Exception as error:
