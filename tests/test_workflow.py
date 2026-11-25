@@ -1,6 +1,7 @@
 import json
 from dataclasses import asdict
 from pathlib import Path
+import sys
 import pytest
 from langchain_core.messages import AIMessage
 from researchdesk.context_policy import prepare_input
@@ -11,6 +12,7 @@ from researchdesk.repair import repair_run
 from researchdesk.storage import RecoveryError, atomic_text
 from researchdesk.verification import SYSTEM_PROMPT_V2, digest
 from researchdesk.workflow import create_workflow, run_workflow
+from researchdesk import workflow as orchestration
 
 
 class Checker:
@@ -105,6 +107,79 @@ def test_rejected_candidate_remains_needs_review_and_is_not_retried_until_pass(w
     assert state["result"]["selected"] == "original" and state["result"]["repair_rounds"] == 1
     assert run_workflow(root, research_runner=research, repair_runner=repair) == state
     assert len(calls) == len(repairs) == 1 and checker.calls == 2
+
+
+@pytest.mark.parametrize("verdict, expected_exit", [("supported", 0), ("unsupported", 3)])
+def test_offline_result_checks_fallback_to_original_without_rewriting_state(workflow, tmp_path, verdict, expected_exit):
+    root, research, _ = workflow
+    state = run_workflow(root, research_runner=research, repair_runner=repair_fixture(Checker(verdict), []))
+    raw = (root / "workflow.json").read_bytes()
+    result = orchestration.check_result(root, tmp_path / "offline")
+    assert result["exit_code"] == expected_exit == state["last_returncode"]
+    assert result["selected"] == "original" and result["factuality_gate"]["status"] == "not_applicable"
+    assert result["final_acceptance"] == "pending" and result["api_requests"] == 0
+    assert (root / "workflow.json").read_bytes() == raw
+
+
+@pytest.mark.parametrize("candidate_label, status, exit_code", [
+    ("supported", "passed", 0), ("not_applicable", "review_required", 3),
+    ("unmatched", "unknown", 3),
+])
+def test_offline_workflow_cli_rechecks_selected_candidate_factuality(
+        workflow, tmp_path, monkeypatch, candidate_label, status, exit_code):
+    root, research, _ = workflow
+
+    class ChangingChecker(Checker):
+        def __call__(self, payload):
+            result = super().__call__(payload)
+            first = result["units"][0]
+            if self.calls == 1:
+                first["links"][0]["verdict"] = "unsupported"
+            elif candidate_label == "not_applicable":
+                first["factual"] = False
+                first["links"][0]["verdict"] = "not_applicable"
+            return result
+
+    def repair(source, destination, *, resume=False):
+        def graph(ledger, *args, **kwargs):
+            evidence_id = next(iter(ledger.evidence))
+            text = "A different line." if candidate_label == "unmatched" else "A fact."
+            return {"messages": [AIMessage(content=f"{text}[{evidence_id}]\nAnother line.[{evidence_id}]")]}
+        return repair_run(source, destination, checker=ChangingChecker(), graph_runner=graph, resume=resume)
+
+    state = run_workflow(root, research_runner=research, repair_runner=repair)
+    assert state["status"] == "model_support_gate_passed" and state["result"]["selected"] == "candidate"
+    before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("The offline check must not load credentials or resume a workflow")
+
+    monkeypatch.setattr(orchestration, "load_dotenv", forbidden)
+    monkeypatch.setattr(orchestration, "run_workflow", forbidden)
+    output = tmp_path / "check"
+    monkeypatch.setattr(sys, "argv", ["workflow", "--check-result", str(root), "--output", str(output)])
+    assert orchestration.main() == exit_code
+    gate = json.loads((output / "gate.json").read_bytes())
+    assert gate["status"] == ("passed" if exit_code == 0 else "review_required")
+    assert gate["factuality_gate"]["status"] == status
+    assert gate["model_support_gate"]["accepted"]
+    assert gate["factuality_gate"]["matched_units"] == (0 if status == "unknown" else 1)
+    assert before == {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    assert orchestration.main() == 1  # Existing results cannot be overwritten.
+
+
+@pytest.mark.parametrize("mutation", ["report", "corpus", "unfinished"])
+def test_workflow_check_rejects_changed_or_unfinished_inputs(workflow, tmp_path, mutation):
+    root, research, _ = workflow
+    if mutation != "unfinished":
+        state = run_workflow(root, research_runner=research, repair_runner=repair_fixture(Checker(), []))
+        path = (Path(state["result"]["selected_report"]) if mutation == "report"
+                else root / state["plan"]["documents"][0]["path"])
+        path.write_bytes(path.read_bytes() + b" changed")
+    output = tmp_path / "check"
+    with pytest.raises(RecoveryError):
+        orchestration.check_result(root, output)
+    assert not output.exists()
 
 
 def test_report_changed_after_completion_cannot_reuse_cached_gate(workflow):

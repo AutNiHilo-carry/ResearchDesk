@@ -57,6 +57,16 @@ runs/workflows/<ID>/：
 
 selected_report始终是供复核的报告路径；只有status明确为model_support_gate_passed才表示模型门槛通过。读取方不能以路径或report.md存在作为研究成功判据。
 
+## 完成态离线检查
+
+```powershell
+python -m researchdesk.workflow --check-result runs/workflows/<ID> --output runs/workflow-checks/<新目录>
+```
+
+该入口核对冻结资料、选中报告、保存评分与原工作流结果，另存 `gate.json`。工作流选中修订候选时，同时执行[未改句子的事实性检查](repair-citation-diagnostics.md#未改句子的事实性检查)。事实标签有变化或无法核验时返回 3；留用原稿时事实性对照记为 `not_applicable`，此时仍由原模型支持门槛决定是否需要复核。
+
+返回 0 表示已通过本入口的离线检查。输入变更或工作流尚未完成时返回 1。检查时无需加载凭证，原工作流和文件保持原样，人工验收仍为 pending。
+
 ## 命令行端到端验收
 
 独立子进程已使用真实 graph、checkpoint、修订和诊断链验证门槛通过、修订预算不足转待复核、零预算停止，以及再次启动不重复调用。供应商由固定脚本替换，无真实 API 或研究质量验证；见 [CLI 验收说明](workflow-cli-acceptance.md)。

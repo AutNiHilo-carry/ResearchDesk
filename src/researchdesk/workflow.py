@@ -132,6 +132,16 @@ def require_assessable(directory):
         raise RecoveryError("Report contains fenced or omitted sections outside the line verifier's coverage; separate review is required.")
 
 
+def frozen_documents(directory, plan):
+    documents = []
+    for row in plan["documents"]:
+        frozen = (directory / row["path"]).resolve()
+        if not frozen.is_relative_to(directory) or file_hash(frozen) != row["sha256"]:
+            raise RecoveryError("Frozen workflow document changed.")
+        documents.append(frozen)
+    return documents
+
+
 def assemble(directory, state):
     source = owned_run(directory, "research", state["source_run_id"])
     candidate = owned_run(directory, "candidate", state["candidate_run_id"])
@@ -164,6 +174,49 @@ def assemble(directory, state):
         selected_body_sha256=digest(body), quality=current["metrics"], support_gate=gate,
         repair_selection=repair["selection"], repair_rounds=repair["rounds_used"], human_review="pending",
         assessment_hashes={"original": file_hash(before_path), "selected": file_hash(selected_path)})
+
+
+def check_result(directory, output):
+    """Recheck a stopped workflow without running any phase or updating its verdict."""
+    directory, output = directory.resolve(), output.resolve()
+    if output.is_relative_to(directory) or output.exists():
+        raise RecoveryError("Check output must be a new directory outside the workflow.")
+    state_path = directory / "workflow.json"
+    raw = state_path.read_bytes()
+    state = json.loads(raw)
+    if (state.get("version") != 1 or state.get("phase") != "done"
+            or state.get("status") not in {"model_support_gate_passed", "needs_review"}):
+        raise RecoveryError("Check requires a completed workflow.")
+    frozen_documents(directory, state["plan"])
+    current = assemble(directory, state)
+    if current != state.get("result") or current["status"] != state["status"]:
+        raise RecoveryError("Completed workflow artifacts changed.")
+
+    factuality = dict(status="not_applicable", reasons=["original_selected"])
+    if current["selected"] == "candidate":
+        from .repair_diagnostics import diagnose
+        candidate = owned_run(directory, "candidate", state["candidate_run_id"])
+        diagnostic = diagnose(candidate)
+        hashes = diagnostic["bindings"]["source_file_sha256"]
+        if (hashes["report.md"] != current["report_sha256"]
+                or hashes["revisions/original-quality.json"] != current["assessment_hashes"]["original"]
+                or hashes["revisions/candidate-quality.json"] != current["assessment_hashes"]["selected"]):
+            raise RecoveryError("Workflow report or saved scoring changed during diagnosis.")
+        factuality = diagnostic["factuality_check"]
+
+    passed = current["support_gate"]["accepted"] and factuality["status"] in {"passed", "not_applicable"}
+    verdict = dict(version="workflow-result-gate-v1", status="passed" if passed else "review_required",
+                   workflow_sha256=hashlib.sha256(raw).hexdigest(), selected=current["selected"],
+                   report_sha256=current["report_sha256"], assessment_hashes=current["assessment_hashes"],
+                   model_support_gate=current["support_gate"], factuality_gate=factuality,
+                   human_review="pending", final_acceptance="pending", api_requests=0,
+                   exit_code=0 if passed else 3)
+    frozen_documents(directory, state["plan"])
+    if state_path.read_bytes() != raw:
+        raise RecoveryError("Workflow state changed during the check.")
+    output.mkdir(parents=True, exist_ok=False)
+    atomic_text(output / "gate.json", json.dumps(verdict, ensure_ascii=False, indent=2))
+    return verdict
 
 
 def write_diagnostics(directory, state):
@@ -206,12 +259,7 @@ def run_workflow(directory, *, research_runner=research_main, repair_runner=repa
             plan = state["plan"]
             if 'tool_policy' in plan:
                 validate_tool_policy(plan['tool_policy'])
-            documents = []
-            for row in plan["documents"]:
-                frozen = (directory / row["path"]).resolve()
-                if not frozen.is_relative_to(directory) or file_hash(frozen) != row["sha256"]:
-                    raise RecoveryError("Frozen workflow document changed.")
-                documents.append(frozen)
+            documents = frozen_documents(directory, plan)
             if state["phase"] == "done":
                 current = assemble(directory, state)
                 if current != state["result"]:
@@ -327,7 +375,9 @@ def summary(state):
 def main():
     parser = argparse.ArgumentParser(description="Research, one-round evidence repair and diagnosis in a resumable workflow")
     parser.add_argument("question", nargs="?")
-    parser.add_argument("--resume", type=Path)
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--resume", type=Path)
+    modes.add_argument("--check-result", type=Path, help="Offline check of saved support and unchanged-row factual labels")
     parser.add_argument("--document", type=Path, action="append", default=[])
     parser.add_argument("--local-only", action="store_true")
     parser.add_argument("--context-mode", choices=["full", "catalog"])
@@ -338,7 +388,21 @@ def main():
     for field, option in POLICY_OPTIONS.items():
         parser.add_argument("--"+option.replace("_", "-"), type=float if field in {"timeout_seconds", "max_duration_seconds"} else int)
     args = parser.parse_args()
-    if args.resume and (args.question or args.document or args.local_only or args.context_mode is not None or args.report_policy is not None or args.search_context is not None or args.max_model_calls is not None or args.output is not None or any(getattr(args, option) is not None for option in POLICY_OPTIONS.values())):
+    generation_options = (args.question or args.document or args.local_only or args.context_mode is not None
+                          or args.report_policy is not None or args.search_context is not None
+                          or args.max_model_calls is not None
+                          or any(getattr(args, option) is not None for option in POLICY_OPTIONS.values()))
+    if args.check_result:
+        if generation_options or args.output is None:
+            parser.error("--check-result needs --output and accepts no generation arguments.")
+        try:
+            verdict = check_result(args.check_result, args.output)
+            print(f"Offline workflow check: {verdict['status']}; zero API: {args.output / 'gate.json'}")
+            return verdict["exit_code"]
+        except Exception as error:
+            print(f"Workflow check failed ({type(error).__name__}); no passing verdict.")
+            return 1
+    if args.resume and (generation_options or args.output is not None):
         parser.error("Resume accepts only the existing workflow directory; no replacement inputs or quota.")
     if not args.resume and (not args.question or not args.question.strip()):
         parser.error("Supply a question or --resume WORKFLOW_DIRECTORY")
