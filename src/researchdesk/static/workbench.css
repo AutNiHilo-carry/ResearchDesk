@@ -80,8 +80,22 @@ input[type="number"] { width: 8rem; }
 .metrics dd { margin: .24rem 0 0; font-size: 1.15rem; font-weight: 700; }
 .result-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(14rem, 19rem); gap: 1rem; align-items: start; }
 .prose { line-height: 1.75; overflow-wrap: anywhere; }
-.prose h3 { margin: 1rem 0 .5rem; }
+.prose h3, .prose h4, .prose h5, .prose h6 { margin: 1rem 0 .45rem; line-height: 1.45; }
+.prose h3 { font-size: 1.3rem; }
+.prose h4 { font-size: 1.1rem; }
+.prose h5, .prose h6 { font-size: 1rem; }
 .prose p { margin-bottom: .8rem; white-space: pre-line; }
+.prose ol, .prose ul { margin: .3rem 0 1rem; padding-inline-start: 1.55rem; }
+.prose li + li { margin-top: .25rem; }
+.prose hr { border: 0; border-top: 1px solid var(--line); margin: 1.2rem 0; }
+.prose code { background: var(--wash); border-radius: 4px; padding: .1rem .25rem; }
+.prose pre { overflow: auto; background: var(--wash); border: 1px solid var(--line); border-radius: 8px; padding: .85rem; }
+.prose pre code { background: transparent; padding: 0; }
+.table-scroll { overflow-x: auto; margin: 1rem 0; border: 1px solid var(--line); border-radius: 8px; }
+.table-scroll table { border-collapse: collapse; width: 100%; min-width: 28rem; }
+.table-scroll th, .table-scroll td { padding: .65rem .75rem; vertical-align: top; text-align: left; }
+.table-scroll th { background: var(--wash); color: var(--ink); }
+.table-scroll tbody tr { border-top: 1px solid var(--line); }
 .citation {
   border: 1px solid #b6d5c6; background: #e7f4ec; color: #134936; border-radius: 6px;
   padding: .1rem .32rem; margin: 0 .18rem; font: 650 .875rem/1.45 "Segoe UI", sans-serif;

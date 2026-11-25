@@ -114,7 +114,7 @@ class Runs:
                     return True
                 del self.processes[job.name]
             attempt = job / "attempt.json"
-            if not attempt.is_file() or read_json(attempt)["status"] == "exited":
+            if not attempt.is_file() or read_json(attempt)["status"] not in {"starting", "running"}:
                 return False
             # An orphaned worker can still own the attempt after the web server restarts.
             try:
@@ -177,6 +177,7 @@ class Runs:
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=3)
+            save_json(job / "attempt.json", {"status": "stopped", "exit_code": process.returncode})
             del self.processes[job.name]
 
 
@@ -198,6 +199,11 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
 
     app = FastAPI(title="ResearchDesk", lifespan=lifespan)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1"])
+
+    @app.get("/static/report.mjs", include_in_schema=False)
+    def report_renderer():
+        return FileResponse(STATIC / "report.mjs", media_type="text/javascript")
+
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     @app.middleware("http")

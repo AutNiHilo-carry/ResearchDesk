@@ -1,4 +1,7 @@
 import time
+from pathlib import Path
+import shutil
+import subprocess
 
 import pytest
 
@@ -24,6 +27,8 @@ def test_offline_demo_serves_assets_and_resolves_report_citations(tmp_path):
     with TestClient(web.create_app(tmp_path), base_url="http://127.0.0.1") as client:
         assert "ResearchDesk" in client.get("/").text
         assert client.get("/static/workbench.js").status_code == 200
+        renderer = client.get("/static/report.mjs")
+        assert renderer.status_code == 200 and "javascript" in renderer.headers["content-type"]
         assert client.get("/api/runs").json() == {"allow_live": False, "runs": []}
         assert client.post("/api/runs", json={"mode": "web", "question": "Question"}).status_code == 403
         assert client.post("/api/runs", json={}, headers={"Origin": "http://elsewhere.test"}).status_code == 403
@@ -71,3 +76,12 @@ if sys.argv[3] == 'start':
         assert done["id"] == run_id and done["resume_count"] == 1 and done["status"] == "completed"
         assert done["metrics"] == parked["metrics"] == dict(model_calls=2, tool_calls=1, provider_requests=0)
         assert done["report"] and done["evidence"]
+
+
+def test_report_renderer():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is needed for the JavaScript renderer checks")
+    script = Path(__file__).with_name("test_web_report.mjs")
+    result = subprocess.run([node, "--test", str(script)], capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stdout + result.stderr

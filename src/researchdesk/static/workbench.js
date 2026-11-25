@@ -1,3 +1,5 @@
+import { renderMarkdown } from "./report.mjs";
+
 const byId = (id) => document.getElementById(id);
 const states = {
   running: "运行中", completed: "已完成", interrupted: "已中断",
@@ -90,7 +92,7 @@ function showEvidence(id, evidence, button) {
 }
 
 function renderReport(run) {
-  const key = JSON.stringify([run.id, run.report, run.status, run.exit_code, run.error_type]);
+  const key = JSON.stringify([run.id, run.report, run.evidence, run.status, run.exit_code, run.error_type]);
   if (key === renderedReport) return;
   renderedReport = key;
   byId("evidence-prompt").hidden = false;
@@ -108,32 +110,18 @@ function renderReport(run) {
     report.append(placeholder);
     return;
   }
-  for (const line of run.report.split("\n")) {
-    if (!line.trim()) continue;
-    const heading = /^#{1,6}\s+/.test(line);
-    const node = document.createElement(heading ? "h3" : "p");
-    const text = line.replace(/^#{1,6}\s+/, "");
-    let offset = 0;
-    for (const match of text.matchAll(/\[(E[0-9a-f]{16})\]/g)) {
-      node.append(text.slice(offset, match.index));
-      const evidence = run.evidence[match[1]];
-      if (evidence) {
-        const citation = document.createElement("button");
-        citation.type = "button";
-        citation.className = "citation";
-        citation.textContent = match[1];
-        citation.setAttribute("aria-label", `查看引用 ${match[1]}`);
-        citation.setAttribute("aria-pressed", "false");
-        citation.addEventListener("click", () => showEvidence(match[1], evidence, citation));
-        node.append(citation);
-      } else {
-        node.append(match[0]);
-      }
-      offset = match.index + match[0].length;
-    }
-    node.append(text.slice(offset));
-    report.append(node);
-  }
+  renderMarkdown(report, run.report, (id) => {
+    const evidence = run.evidence[id];
+    if (!evidence) return null;
+    const citation = document.createElement("button");
+    citation.type = "button";
+    citation.className = "citation";
+    citation.textContent = id;
+    citation.setAttribute("aria-label", `查看引用 ${id}`);
+    citation.setAttribute("aria-pressed", "false");
+    citation.addEventListener("click", () => showEvidence(id, evidence, citation));
+    return citation;
+  });
 }
 
 function renderRun(run) {
