@@ -6,7 +6,7 @@
 
 用户提出问题 → 制定计划 → 搜索/读取资料 → 记录证据 → 比较方案 → 生成带引用报告 → 检查、有限修订或转待复核。
 
-**当前处于 Phase 3，工程机制已有验证，研究质量与独立人工标签仍待验收。** 详见 [2026-11-23 质量阶段汇总](docs/status-20261123-quality.md)。完整说明集中在 [文档导航](docs/index.md)，方向以 [项目约束](docs/direction.md) 为准。
+**作品集版已结项。** 工程机制已验证，SQLite 备份主案例的 197 字符修订稿已通过项目作者复核。研究质量仍处于 Phase 3，独立人工验收待完成。 [作者复核记录](docs/portfolio-demo-v1.md#作品集版结项范围) · [文档导航](docs/index.md) · [项目约束](docs/direction.md)
 
 ## 3–5 分钟项目演示
 
@@ -74,7 +74,7 @@ Copy-Item .env.example .env
 
 ## 当前代码验证证据
 
-- 代码快照 `419b48d` 通过 1,122 项离线测试和源码目录外的 wheel 安装检查。安装版本可创建交付包、独立验包并拒绝篡改。 [代码验收](https://github.com/AutNiHilo-carry/ResearchDesk/actions/runs/45596286988)
+- 代码快照 `7003d00` 通过 1,131 项离线测试和源码目录外的 wheel 安装检查。安装版本可创建交付包、独立验包并拒绝篡改。 [代码验收](https://github.com/AutNiHilo-carry/ResearchDesk/actions/runs/45611701445)
 - [恢复矩阵](docs/recovery-ci.md)、[模型响应/checkpoint 间隙](docs/model-response-gap.md)、[评分结果落盘间隙](docs/workflow-verification-gap.md)：不同窗口采用不同恢复语义，安全停止不等于研究任务完成。
 - [技术选型任务集](docs/technical-selection-eval.md)与[真实模型首轮结果](docs/technical-selection-pilot-v1.md)：生成流程可运行，评分有失败和争议，未证明候选策略更优。
 - [模型评分与验收边界](docs/model-assessment-boundary.md)、[人工复核材料](docs/technical-selection-human-review.md)：评分有效、模型门槛和最终验收分别记录，人工标签仍待填写。
