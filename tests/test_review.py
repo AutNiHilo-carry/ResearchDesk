@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 from researchdesk.ledger import Ledger
-from researchdesk.review import (build_packet, candidate_packet, export_review, fingerprint,
+from researchdesk.review import (build_packet, export_candidate_review, export_review, fingerprint,
                                  import_candidate_review, import_review)
 from researchdesk.task_eval import evaluate_batch, load_taskset
 from researchdesk.verification import VerificationError
@@ -116,21 +116,44 @@ def test_changed_evaluation_input_invalidates_review(review_case, tmp_path):
 
 @pytest.fixture
 def candidate_case(review_case, tmp_path):
-    from researchdesk.delivery import blank_review
     evaluation, dataset, _ = review_case
     original, = build_packet(evaluation, dataset)["tasks"]
     body = original["report"].replace("Document fact.", "Document fact. Scope was clarified.")
     candidate = tmp_path / "candidate.md"
     candidate.write_text(body, encoding="utf-8")
-    packet, _ = candidate_packet(original, body)
     bundle = tmp_path / "candidate-review"
-    bundle.mkdir()
-    packet_hash = fingerprint(packet)
-    (bundle / "packet.json").write_text(json.dumps(dict(sha256=packet_hash, content=packet)), encoding="utf-8")
-    (bundle / "review.json").write_text(json.dumps(blank_review(packet, packet_hash)), encoding="utf-8")
+    export_candidate_review(evaluation, dataset, "case", candidate, bundle)
     submitted = tmp_path / "opinion.json"
     submitted.write_text(json.dumps(filled_review(bundle)), encoding="utf-8")
     return evaluation, dataset, bundle, candidate, submitted
+
+
+def test_cli_candidate_export_is_reproducible_and_hides_scores(candidate_case, tmp_path, monkeypatch):
+    import sys
+    from researchdesk import review
+    evaluation, dataset, bundle, candidate, _ = candidate_case
+    new = tmp_path / "re-export"
+    monkeypatch.setattr(sys, "argv", ["review", "export-candidate", str(evaluation), "--dataset", str(dataset),
+        "--task-id", "case", "--candidate", str(candidate), "--output", str(new)])
+    assert review.main() == 0
+    assert {p.name: p.read_bytes() for p in new.iterdir()} == {p.name: p.read_bytes() for p in bundle.iterdir()}
+    packet = json.loads((new / "packet.json").read_bytes())["content"]
+    assert packet["publication"] == "unpublished"
+    assert "citation_precision" not in json.dumps(packet)
+    assert all(Path(row["location"]).parent == Path(".") for row in packet["tasks"][0]["sources"].values())
+
+
+@pytest.mark.parametrize("problem", ["missing_task", "unknown_evidence", "inside_source"])
+def test_candidate_export_refuses_unbound_inputs(review_case, tmp_path, problem):
+    evaluation, dataset, _ = review_case
+    task, = build_packet(evaluation, dataset)["tasks"]
+    candidate = tmp_path / "candidate.md"
+    body = task["report"] if problem != "unknown_evidence" else "Unknown fact. [E0000000000000000]"
+    candidate.write_text(body, encoding="utf-8")
+    output = (evaluation if problem == "inside_source" else tmp_path) / "export"
+    with pytest.raises(VerificationError):
+        export_candidate_review(evaluation, dataset, "absent" if problem == "missing_task" else "case", candidate, output)
+    assert not output.exists()
 
 
 def test_candidate_opinion_records_only_unpublished_scope(candidate_case, tmp_path, monkeypatch):

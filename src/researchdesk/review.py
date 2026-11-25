@@ -80,9 +80,7 @@ def build_packet(evaluation, dataset):
         provenance="project-authored tasks; reviewer identity is self-declared, not independently authenticated")
 
 
-def export_review(evaluation, dataset, output):
-    packet = build_packet(evaluation, dataset)
-    packet_hash = fingerprint(packet)
+def blank_review(packet, packet_hash):
     template = dict(schema_version=1, packet_sha256=packet_hash, reviewer="", reviewed_at="", tasks=[])
     for task in packet["tasks"]:
         if task["generation_status"] != "completed":
@@ -92,10 +90,20 @@ def export_review(evaluation, dataset, output):
                 dict(evidence_id=eid, verdict=None, reason="") for eid in row["citations"]])
             for row in task["units"]], criteria=[dict(criterion_id=row["id"], passed=None,
                 report_quote="", reason="") for row in task["criteria"]]))
+    return template
+
+
+def write_review_bundle(packet, output):
+    packet_hash = fingerprint(packet)
     output.mkdir(parents=True, exist_ok=False)
     atomic_text(output / "packet.json", json.dumps(dict(sha256=packet_hash, content=packet), ensure_ascii=False, indent=2))
-    atomic_text(output / "review.json", json.dumps(template, ensure_ascii=False, indent=2))
+    atomic_text(output / "review.json", json.dumps(blank_review(packet, packet_hash), ensure_ascii=False, indent=2))
     atomic_text(output / 'reading.md', reading_guide(packet))
+    return packet_hash
+
+
+def export_review(evaluation, dataset, output):
+    packet_hash = write_review_bundle(build_packet(evaluation, dataset), output)
     atomic_text(output / "README.md", """# 待人工复核
 
 先阅读 packet.json 中问题、报告、证据摘录及 sources 全文，再填写 review.json。
@@ -260,6 +268,29 @@ def candidate_packet(material, body):
     return packet, reference
 
 
+def completed_source_task(packet, task_id):
+    for task in packet["tasks"]:
+        if task["task_id"] == task_id and task["generation_status"] == "completed":
+            return task
+    raise VerificationError("Candidate requires one matching completed source task.")
+
+
+def export_candidate_review(evaluation, dataset, task_id, candidate_path, output):
+    output = output.resolve()
+    if output.is_relative_to(evaluation.resolve()):
+        raise VerificationError("Review output must be outside the underlying evaluation.")
+    original = build_packet(evaluation, dataset)
+    material = completed_source_task(original, task_id)
+    body = candidate_path.read_text(encoding="utf-8")
+    packet, reference = candidate_packet(material, body)
+    payload, _ = prepare(reference["units"], reference["evidence"], reference["sources"])
+    if any(row["integrity"] != "valid" for row in payload["evidence"]):
+        raise VerificationError("Candidate review requires valid references to the frozen evidence.")
+    if candidate_path.read_text(encoding="utf-8") != body or build_packet(evaluation, dataset) != original:
+        raise VerificationError("Candidate review inputs changed while preparing the bundle.")
+    return write_review_bundle(packet, output)
+
+
 def import_candidate_review(evaluation, dataset, bundle, candidate_path, review_path, output):
     """Bind opinions to the unpublished body and original corpus, separately from scored reports."""
     output = output.resolve()
@@ -270,12 +301,9 @@ def import_candidate_review(evaluation, dataset, bundle, candidate_path, review_
     envelope = json.loads(frozen)
     declared, = envelope["content"]["tasks"]
     original = build_packet(evaluation, dataset)
-    materials = [row for row in original["tasks"] if row["task_id"] == declared["task_id"]
-                 and row["generation_status"] == "completed"]
-    if len(materials) != 1:
-        raise VerificationError("Candidate requires one matching completed source task.")
+    material = completed_source_task(original, declared["task_id"])
     body = candidate_path.read_text(encoding="utf-8")
-    packet, reference = candidate_packet(materials[0], body)
+    packet, reference = candidate_packet(material, body)
     packet_hash = fingerprint(packet)
     if envelope["content"] != packet or envelope["sha256"] != packet_hash:
         raise VerificationError("Candidate body, review packet or source evidence changed.")
@@ -300,22 +328,30 @@ def import_candidate_review(evaluation, dataset, bundle, candidate_path, review_
 
 def main():
     parser = argparse.ArgumentParser(description="Offline, human-declared research review")
-    parser.add_argument("action", choices=["export", "import", "import-candidate"])
+    parser.add_argument("action", choices=["export", "import", "export-candidate", "import-candidate"])
     parser.add_argument("evaluation", type=Path)
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--bundle", type=Path)
     parser.add_argument("--review", type=Path)
     parser.add_argument("--candidate", type=Path)
+    parser.add_argument("--task-id")
     args = parser.parse_args()
     try:
-        if (args.action == "import-candidate") != (args.candidate is not None):
-            parser.error("--candidate is required for import-candidate only")
+        if args.action.endswith("-candidate") != (args.candidate is not None):
+            parser.error("--candidate is required for export-candidate and import-candidate only")
+        if (args.action == "export-candidate") != (args.task_id is not None):
+            parser.error("--task-id is required for export-candidate only")
         if args.action == "export":
             if args.bundle or args.review:
                 parser.error("export does not accept --bundle/--review")
             export_review(args.evaluation.resolve(), args.dataset, args.output)
             print(f"Pending human review: {args.output}; no human score assigned.")
+        elif args.action == "export-candidate":
+            if args.bundle or args.review:
+                parser.error("export-candidate does not accept --bundle/--review")
+            export_candidate_review(args.evaluation, args.dataset, args.task_id, args.candidate, args.output)
+            print(f"Candidate review awaiting input: {args.output}; zero API requests.")
         elif args.action == "import":
             if not args.bundle or not args.review:
                 parser.error("import requires --bundle and --review")

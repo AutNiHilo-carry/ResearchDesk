@@ -8,7 +8,7 @@ import re
 from tempfile import TemporaryDirectory
 from .policy import ToolLimits
 from .report_constraints import check_body, policy as constraint_policy
-from .review import build_packet, export_review, fingerprint, reading_guide
+from .review import blank_review, build_packet, export_review, fingerprint, reading_guide
 from .storage import atomic_text
 from .task_eval import check_saved_result, quality_metrics, result_gate
 from .task_grading import grade_tasks
@@ -76,17 +76,6 @@ def statistics(result, packet, evaluation):
         total_tokens=count(result.get('total_tokens')), retry_count=count(result.get('retry_count')),
         evaluation_elapsed_seconds=seconds(result.get('evaluation_elapsed_seconds')),
         estimated_fee=None, recovery_rate=None, tasks=tasks), hashes
-
-
-def blank_review(packet, packet_hash):
-    tasks=[]
-    for task in packet['tasks']:
-        if task['generation_status']!='completed':
-            continue
-        tasks.append(dict(task_id=task['task_id'], units=[dict(unit_id=u['unit_id'],factual=None,reason='',
-            links=[dict(evidence_id=eid,verdict=None,reason='') for eid in u['citations']]) for u in task['units']],
-            criteria=[dict(criterion_id=c['id'],passed=None,report_quote='',reason='') for c in task['criteria']]))
-    return dict(schema_version=1,packet_sha256=packet_hash,reviewer='',reviewed_at='',tasks=tasks)
 
 
 def render_index(packet,gate,scope,label_status,stats):

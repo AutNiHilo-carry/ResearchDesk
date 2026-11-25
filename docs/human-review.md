@@ -41,6 +41,14 @@ reviewer身份为自行声明，程序无法证明是谁填写。测试桩只能
 
 ## 未发布修订稿的复核意见
 
+从原评测的单个任务、候选正文和原证据生成可分享材料：
+
+```powershell
+python -m researchdesk.review export-candidate <原评测目录> --dataset <任务集.json> --task-id <任务ID> --candidate <候选正文.md> --output <新目录>
+```
+
+导出 `reading.md`、绑定正文和证据的 `packet.json` 以及空白 `review.json`。来源只显示文件名，材料中没有已有的评分或人工意见。引用无效或原评测与候选之间的证据无法核验时，拒绝导出。
+
 收到绑定到 `unpublished-candidate-review-v1` 复核包的已填写表后，可以离线导入：
 
 ```powershell
