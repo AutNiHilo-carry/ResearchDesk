@@ -1,5 +1,7 @@
 # 实习展示：新案例与可复现演示
 
+新读者可直接从[3–5 分钟讲解路线](#五分钟讲解路线)开始。演示采用一份真实研究交付和一个可离线重现的发布失败，五题批次供进一步查看评分和局限。
+
 [首轮真实执行结果](portfolio-cases-result-20261123.md)已记录：实际21次SDK请求；v1评分格式失败，v2模型与应用门槛通过1/3，人工审核pending。不是成功率提升证明。
 
 失败讲解可结合[逐句引用诊断](portfolio-citation-diagnosis-20261123.md)，展示结论引用不完整、推断缺引用和混合句排除问题；开发诊断与待人工表分别保留。
@@ -44,15 +46,24 @@ package不重新生成或评分；只有完整评分的组才会导出可验证�
 
 execute返回0仅在两组应用门槛都通过时成立；存在未通过／未知返回3；操作错误返回1，参数错误返回2。package返回0仅代表离线整理完成，具体质量看首页与原记录。人工复核始终pending，未知Token不填0，金额未测。
 
-## 3–5分钟讲解路线
+## 五分钟讲解路线
 
-1. 从真实需求说明“为什么需要资料研究”，展示5题目录、官方来源与研究范围。
-2. 展示一题从问题、证据摘录到报告的路径，点击每个关键结论对应的来源，解释指标来自模型而非人工金标。
-3. 对照v1/v2的模型门槛、正文计数、应用门槛及Token；保留失败，不用一次分差证明策略更优。
-4. 展示可携带交付包，运行 `python -m researchdesk.delivery verify <包目录>`，说明验包通过与研究正确性不同。
-5. 用现有[强杀恢复证据](recovery-ci.md)讲一个故障窗口：框架提供checkpoint，项目负责回执、预算和恢复语义；未知操作不能凭猜测重复执行。
+1. **30 秒介绍项目。** ResearchDesk 接受开发者的技术研究或选型问题，用 Evidence Ledger 保存结论与出处。Deep Agents 和 LangGraph 提供运行时及检查点，ResearchDesk 实现工具控制、恢复决策和评测。
+2. **60 秒讲真实交付。** 问题是持续写入 SQLite WAL 库时能否只复制主文件。沿着结论查看 WAL 与持久状态的证据摘记，再看 Online Backup API 和备份边界。历史运行交付了 189/200 字符的带引用报告，通过业务和引用的模型辅助门槛。 [WAL 证据摘记](../evals/fixtures/sqlite-wal-backup-portfolio-v1.md) · [真实运行记录](final-turn-pilot-20261124.md)
+3. **60 秒讲失败和恢复。** 另一轮真实运行因最终稿达到 214/200 而拒绝发布。固定该候选与同一运行的 190 字符预检稿做离线对照，关闭回退会拒绝发布，开启后保留超长稿并交付已预检草稿。真实子进程测试在选择回执写完、报告写完两个窗口分别强杀进程，重启后完成发布，模型和工具调用次数未增加。 [发布与回退对照](final-body-gate-guide.md#同一次历史运行的发布对照) · [强杀测试](../tests/test_overflow_publication_kill.py)
+4. **60 秒展示可复现证据。** 打开零 API 演示打印的 `summary.md`，展示权限拦截、证据验证与回执复用。恢复实验可提前生成回执，讲解时对照故障前后的调用计数。研究质量的独立人工验收仍待完成。 [演示检查项](offline-acceptance.md) · [恢复矩阵](recovery-ci.md)
 
-实际模型运行耗时不必硬塞进视频时长，可展示有来源绑定的已保存执行记录；清楚标注“历史运行回放”，不冒充现场实时完成。材料包含机器标签，不称为独立盲审。开发侧阅读和独立人工验收分别标识。
+仓库根目录安装依赖后，可运行以下命令。两类验证都使用固定资料且无外部 API 请求。
+
+```powershell
+.\.venv\Scripts\python.exe -m researchdesk.acceptance_demo
+.\.venv\Scripts\python.exe -m researchdesk.fault_eval --scripted --timeout 120
+.\.venv\Scripts\python.exe -m pytest -q tests/test_overflow_publication_kill.py
+```
+
+公开仓库提供源码、证据摘记和实验记录。已有本地评测包时，可另演示 `python -m researchdesk.delivery verify <包目录>`；新克隆可直接运行上述零 API 验证。
+
+2026-11-25 在 Windows 上复跑了以上路线。机制检查 7/7，恢复矩阵确认注入并恢复 3/3，回退发布的两项强杀测试通过。本地回执位于 `runs/portfolio-closeout/20261125-a/`。
 
 ## 面试中需要本人讲清楚
 

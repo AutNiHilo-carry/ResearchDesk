@@ -8,9 +8,13 @@
 
 **当前处于 Phase 3，工程机制已有验证，研究质量与独立人工标签仍待验收。** 详见 [2026-11-23 质量阶段汇总](docs/status-20261123-quality.md)。完整说明集中在 [文档导航](docs/index.md)，方向以 [项目约束](docs/direction.md) 为准。
 
-## 核心工程贡献
+## 3–5 分钟项目演示
 
-[五个后端研究案例与3–5分钟演示](docs/portfolio-demo-v1.md)已加入，五题已在两个冻结批次执行。[首轮](docs/portfolio-cases-result-20261123.md)保留评分失败；[后两题](docs/portfolio-reserved-result-20261123.md)的四份报告均未过应用门槛。完整状态及实验决定见阶段汇总，不晋升默认策略，独立人工复核仍pending。
+1. 看一次真实研究交付。SQLite 持续写入时，只复制主文件是否稳妥？已保存的运行交付了 189/200 字符的报告，通过业务与引用的模型辅助门槛。 [研究记录](docs/final-turn-pilot-20261124.md)
+2. 看一次可恢复的发布失败。同一历史运行的超长最终稿与预检草稿用于离线对照。开启回退后，应用保留 214 字符原候选，发布 190 字符草稿；强杀测试验证发布阶段可冷启动恢复。 [发布与恢复记录](docs/final-body-gate-guide.md#同一次历史运行的发布对照)
+3. 运行下方的零 API 快速体验，查看工具权限、预算、回执和证据检查。 [完整演示路线](docs/portfolio-demo-v1.md#五分钟讲解路线)
+
+## 核心工程贡献
 
 Deep Agents / LangGraph 提供 runtime、checkpoint、context 和 tool calling 等 primitive。本项目在这些能力之上设计应用策略，边界如下：
 
@@ -70,7 +74,7 @@ Copy-Item .env.example .env
 
 ## 当前代码验证证据
 
-- [交付包版本的代码验收](https://github.com/AutNiHilo-carry/ResearchDesk/actions/runs/45143659192)：973项离线测试、固定资料演示、强杀回执核验与源码目录外的 wheel 安装检查通过（2026-11-23，代码快照 `251c6e0`）。安装版本实际创建通过／待审包、独立验包并拒绝篡改；文档整理引用该已完成代码验收。
+- 代码快照 `419b48d` 通过 1,122 项离线测试和源码目录外的 wheel 安装检查。安装版本可创建交付包、独立验包并拒绝篡改。 [代码验收](https://github.com/AutNiHilo-carry/ResearchDesk/actions/runs/45596286988)
 - [恢复矩阵](docs/recovery-ci.md)、[模型响应/checkpoint 间隙](docs/model-response-gap.md)、[评分结果落盘间隙](docs/workflow-verification-gap.md)：不同窗口采用不同恢复语义，安全停止不等于研究任务完成。
 - [技术选型任务集](docs/technical-selection-eval.md)与[真实模型首轮结果](docs/technical-selection-pilot-v1.md)：生成流程可运行，评分有失败和争议，未证明候选策略更优。
 - [模型评分与验收边界](docs/model-assessment-boundary.md)、[人工复核材料](docs/technical-selection-human-review.md)：评分有效、模型门槛和最终验收分别记录，人工标签仍待填写。
