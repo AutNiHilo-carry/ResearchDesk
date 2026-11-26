@@ -143,6 +143,10 @@ function renderRun(run) {
     ? `${run.metrics.model_calls ?? "—"} / ${run.model_limit}` : run.metrics.model_calls ?? "—";
   byId("tool-calls").textContent = run.metrics.tool_calls ?? "—";
   byId("provider-requests").textContent = run.metrics.provider_requests ?? "—";
+  const download = byId("download-report");
+  download.hidden = run.status !== "completed" || !run.report;
+  if (download.hidden) download.removeAttribute("href");
+  else download.href = `/api/runs/${encodeURIComponent(run.id)}/report.zip`;
   renderReport(run);
   byId("editor").hidden = true;
   byId("detail").hidden = false;

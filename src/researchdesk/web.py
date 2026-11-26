@@ -1,6 +1,7 @@
 """Loopback workbench over the same CLI, ledger, and recovery policy."""
 import argparse
 from contextlib import asynccontextmanager
+from io import BytesIO
 import json
 import os
 from pathlib import Path
@@ -11,9 +12,10 @@ import sys
 from threading import RLock
 from typing import Literal
 from uuid import uuid4
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -181,6 +183,20 @@ class Runs:
             del self.processes[job.name]
 
 
+def read_completed_report(directory):
+    citations = {}
+    try:
+        report, evidence, sources, _ = load_run(directory)
+    except (ValueError, OSError, sqlite3.Error) as error:
+        raise HTTPException(409, "The completed report could not be verified.") from error
+    for eid, item in evidence.items():
+        source = sources.get(item["source_id"], {})
+        location = source.get("location") or ""
+        citations[eid] = dict(claim=item["claim"], snippet=item["snippet"],
+            title=source.get("title"), location=Path(location).name if source.get("kind") == "local" else location)
+    return report, citations
+
+
 def create_app(output=Path("runs/web"), *, allow_live=False):
     runs = Runs(Path(output), allow_live)
 
@@ -253,17 +269,24 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
             metrics = {}
         report, citations = None, {}
         if record["status"] == "completed":
-            try:
-                report, evidence, sources, _ = load_run(directory)
-            except (ValueError, OSError, sqlite3.Error) as error:
-                raise HTTPException(409, "The completed report could not be verified.") from error
-            for eid, item in evidence.items():
-                source = sources.get(item["source_id"], {})
-                location = source.get("location") or ""
-                citations[eid] = dict(claim=item["claim"], snippet=item["snippet"],
-                    title=source.get("title"), location=Path(location).name if source.get("kind") == "local" else location)
+            report, citations = read_completed_report(directory)
         return dict(**record, report=report, evidence=citations,
                     metrics={key: metrics.get(key) for key in ("model_calls", "tool_calls", "provider_requests")})
+
+    @app.get("/api/runs/{run_id}/report.zip", response_class=Response)
+    def export_report(run_id: str):
+        job = runs.job(run_id)
+        if runs.overview(job)["status"] != "completed":
+            raise HTTPException(409, "The report is available after the run completes.")
+        report, citations = read_completed_report(child_run_path(runs.research, run_id))
+        archive = BytesIO()
+        with ZipFile(archive, "w", compression=ZIP_DEFLATED) as bundle:
+            bundle.writestr("report.md", report)
+            bundle.writestr("evidence.json", json.dumps(citations, ensure_ascii=False, indent=2) + "\n")
+        return Response(archive.getvalue(), media_type="application/zip", headers={
+            "Content-Disposition": f'attachment; filename="researchdesk-{run_id}.zip"',
+            "Cache-Control": "no-store",
+        })
 
     @app.post("/api/runs/{run_id}/resume", status_code=202)
     def resume(run_id: str):

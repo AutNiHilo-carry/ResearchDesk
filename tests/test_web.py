@@ -1,7 +1,10 @@
+from io import BytesIO
+import json
 import time
 from pathlib import Path
 import shutil
 import subprocess
+from zipfile import ZipFile
 
 import pytest
 
@@ -25,7 +28,9 @@ def wait_for(client, run_id, ready, timeout=45):
 
 def test_offline_demo_serves_assets_and_resolves_report_citations(tmp_path):
     with TestClient(web.create_app(tmp_path), base_url="http://127.0.0.1") as client:
-        assert "ResearchDesk" in client.get("/").text
+        page = client.get("/").text
+        assert "ResearchDesk" in page and 'id="download-report"' in page
+        assert client.get("/api/runs/unknown/report.zip").status_code == 404
         assert client.get("/static/workbench.js").status_code == 200
         renderer = client.get("/static/report.mjs")
         assert renderer.status_code == 200 and "javascript" in renderer.headers["content-type"]
@@ -40,6 +45,15 @@ def test_offline_demo_serves_assets_and_resolves_report_citations(tmp_path):
         assert done["status"] == "completed"
         eid, = done["evidence"]
         assert f"[{eid}]" in done["report"] and "exact evidence quotes" in done["evidence"][eid]["snippet"]
+        download = client.get(f"/api/runs/{run_id}/report.zip")
+        assert download.status_code == 200
+        assert download.headers["content-type"] == "application/zip"
+        assert download.headers["content-disposition"] == f'attachment; filename="researchdesk-{run_id}.zip"'
+        assert download.headers["cache-control"] == "no-store"
+        with ZipFile(BytesIO(download.content)) as bundle:
+            assert bundle.namelist() == ["report.md", "evidence.json"]
+            assert bundle.read("report.md").decode() == done["report"]
+            assert json.loads(bundle.read("evidence.json")) == done["evidence"]
         assert done["metrics"]["provider_requests"] == 0
         assert client.post(f"/api/runs/{run_id}/resume").status_code == 409
 
@@ -67,6 +81,7 @@ if sys.argv[3] == 'start':
         run_id = started.json()["id"]
         parked = wait_for(client, run_id, lambda _: (tmp_path / "ready.json").is_file())
         assert parked["status"] == "running" and parked["report"] is None
+        assert client.get(f"/api/runs/{run_id}/report.zip").status_code == 409
         assert client.post("/api/runs", json={"mode": "demo"}).status_code == 409
         assert len(client.get("/api/runs").json()["runs"]) == 1
         stopped = client.post(f"/api/runs/{run_id}/stop").json()
