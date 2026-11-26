@@ -17,6 +17,7 @@ const messages = {
   422: "请检查问题、资料和模型调用上限。",
 };
 let selection = location.hash.slice(1) || null;
+let navigationVersion = 0;
 let latest = null;
 let renderedReport = null;
 let renderedActivity = null;
@@ -24,6 +25,7 @@ let activeCitation = null;
 let renderedHistory = null;
 let historyRecords = null;
 let refreshing = false;
+let refreshQueued = false;
 let connected = false;
 let submitting = false;
 let active = false;
@@ -257,14 +259,19 @@ function renderRun(run) {
   renderActivity(run);
   renderReport(run);
   byId("locate-citation-issue").hidden = !document.querySelector(issueSelector);
+  byId("run-loading").hidden = true;
   byId("editor").hidden = true;
   byId("detail").hidden = false;
 }
 
-async function refresh() {
-  if (refreshing) return;
+async function refresh({ queueIfBusy = false } = {}) {
+  if (refreshing) {
+    if (queueIfBusy) refreshQueued = true;
+    return;
+  }
   refreshing = true;
   let selected = null;
+  let version = navigationVersion;
   try {
     const snapshot = await request("/api/runs");
     connected = true;
@@ -277,9 +284,11 @@ async function refresh() {
     historyRecords = snapshot.runs;
     renderHistory();
     selected = selection;
+    version = navigationVersion;
     if (selected) {
       const run = await request(`/api/runs/${encodeURIComponent(selected)}`);
-      if (selection === selected) renderRun(run);
+      if (version !== navigationVersion) return;
+      renderRun(run);
     }
     showRefreshError();
   } catch (error) {
@@ -287,40 +296,58 @@ async function refresh() {
       connected = false;
       setConnectionLabel("连接中断");
       showRefreshError("暂时无法刷新运行记录，正在自动重连。");
-    } else if (selection === selected) {
+    } else if (version === navigationVersion) {
+      byId("run-loading").hidden = true;
       showRefreshError(error.message);
     }
   } finally {
     syncRunActions();
     refreshing = false;
+    if (refreshQueued) {
+      refreshQueued = false;
+      void refresh();
+    }
   }
 }
 
-function showRun(id) {
+function showPendingRun() {
+  byId("editor").hidden = Boolean(selection);
+  byId("run-loading").hidden = !selection;
+  byId("detail").hidden = true;
+}
+
+function showRun(id, updateHistory = true) {
+  if (id === selection) {
+    void refresh({ queueIfBusy: true });
+    return;
+  }
+  navigationVersion += 1;
   selection = id;
   latest = null;
   showError();
   showRefreshError();
   syncRunActions();
-  history.replaceState(null, "", id ? `#${id}` : location.pathname);
-  if (!id) {
-    byId("editor").hidden = false;
-    byId("detail").hidden = true;
+  if (updateHistory) {
+    history.pushState(null, "", id ? `#${id}` : location.pathname + location.search);
   }
-  void refresh();
+  showPendingRun();
+  renderHistory();
+  void refresh({ queueIfBusy: true });
 }
 
 async function changeRun(path, data) {
   if (!connected || submitting) return;
   submitting = true;
+  const version = navigationVersion;
   showError();
   setMode();
   try {
     const run = await request(path, { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data ?? {}) });
-    showRun(run.id);
+    if (version === navigationVersion) showRun(run.id);
+    else void refresh({ queueIfBusy: true });
   } catch (error) {
-    showError(error);
+    if (version === navigationVersion) showError(error);
   } finally {
     submitting = false;
     setMode();
@@ -348,6 +375,8 @@ byId("research-form").addEventListener("submit", (event) => {
 });
 byId("stop").addEventListener("click", () => latest && changeRun(`/api/runs/${latest.id}/stop`));
 byId("resume").addEventListener("click", () => latest && changeRun(`/api/runs/${latest.id}/resume`));
+window.addEventListener("hashchange", () => showRun(location.hash.slice(1) || null, false));
+showPendingRun();
 setMode();
 void refresh();
 setInterval(refresh, 1500);
