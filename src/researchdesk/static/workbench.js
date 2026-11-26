@@ -13,6 +13,7 @@ const percent = new Intl.NumberFormat("zh-CN", { style: "percent", maximumFracti
 const recoveryBoundaries = {
   report: "报告写入后",
   receipt: "工具结果写入后",
+  evidence: "证据写入后、工具结果提交前",
   model_response: "模型响应返回后、写入检查点前",
 };
 const modes = { recovery_demo: "离线恢复演示", demo: "离线示例", local: "本地资料", web: "网页研究" };
@@ -318,10 +319,15 @@ function renderRun(run) {
         ? "。已用原运行 ID 恢复并发布报告。"
         : "。原运行的模型预算已用完，恢复在发起下一次请求前停止。";
       const before = run.recovery_demo_before;
-      if (before && Number.isInteger(run.metrics.tool_calls) && Number.isInteger(run.metrics.recovery_replays)) {
-        demo.textContent += "模型调用 " + before.model_calls + " → " + run.metrics.model_calls +
-          "，工具调用 " + before.tool_calls + " → " + run.metrics.tool_calls +
-          "，已记录结果复用 " + before.recovery_replays + " → " + run.metrics.recovery_replays + "。";
+      if (before) {
+        const labels = {
+          model_calls: "模型调用", tool_calls: "工具调用", retry_count: "工具再次执行",
+          recovery_replays: "已记录结果复用", evidence_count: "台账证据",
+        };
+        const comparison = Object.entries(labels)
+          .filter(([key]) => Number.isInteger(before[key]) && Number.isInteger(run.metrics[key]))
+          .map(([key, label]) => label + " " + before[key] + " → " + run.metrics[key]);
+        if (comparison.length) demo.textContent += comparison.join("，") + "。";
       }
     }
   }

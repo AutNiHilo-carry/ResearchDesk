@@ -18,10 +18,11 @@ def install_fault(point, marker, root, *, exit_code=None):
             raise ValueError("Fault boundary is outside this worker's run root.")
         receipt = dict(point=point, run_id=directory.name, pid=os.getpid(), reached_at=now())
         if exit_code is not None:
-            from .run_metrics import run_metrics
+            from .run_metrics import run_metrics_snapshot
 
-            metrics = run_metrics(directory)
-            receipt["before"] = {key: metrics[key] for key in ("model_calls", "tool_calls", "recovery_replays")}
+            metrics, _ = run_metrics_snapshot(directory, count_evidence=True)
+            receipt["before"] = {key: metrics[key] for key in
+                                 ("model_calls", "tool_calls", "recovery_replays", "retry_count", "evidence_count")}
         atomic_text(marker, json.dumps(receipt))
         if exit_code is not None:
             os._exit(exit_code)

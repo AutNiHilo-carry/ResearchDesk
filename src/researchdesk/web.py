@@ -40,7 +40,7 @@ class ResearchRequest(BaseModel):
     mode: Literal["demo", "recovery_demo", "local", "web"] = "demo"
     question: str = Field(default="", max_length=4000)
     notes: str = Field(default="", max_length=50000)
-    recovery_point: Literal["report", "receipt", "model_response"] | None = None
+    recovery_point: Literal["report", "receipt", "model_response", "evidence"] | None = None
     recovery_budget: Literal[1, 3] | None = None
     max_model_calls: int = Field(default=6, ge=1, le=12)
 
@@ -240,7 +240,7 @@ def report_with_evidence(report, citations):
 
 def read_run_observability(directory):
     try:
-        metrics, events = run_metrics_snapshot(directory)
+        metrics, events = run_metrics_snapshot(directory, count_evidence=True)
     except sqlite3.Error:
         metrics, events = {}, []
     activity = []
@@ -250,7 +250,7 @@ def read_run_observability(directory):
                          ("event_id", "event", "tool", "timestamp", "error_code", "will_retry") if key in safe})
     public_metrics = {key: metrics.get(key) for key in
                       ("model_calls", "tool_calls", "provider_requests", "tool_successes",
-                       "tool_outcomes", "tool_success_rate", "retry_count", "recovery_replays")}
+                       "tool_outcomes", "tool_success_rate", "retry_count", "recovery_replays", "evidence_count")}
     return public_metrics, activity
 
 
@@ -282,7 +282,9 @@ def recovery_demo_before(record, job):
     keys = ("model_calls", "tool_calls", "recovery_replays")
     if not isinstance(before, dict) or any(type(before.get(key)) is not int or before[key] < 0 for key in keys):
         return None
-    return {key: before[key] for key in keys}
+    optional = ("retry_count", "evidence_count")
+    return {key: before[key] for key in (*keys, *optional)
+            if type(before.get(key)) is int and before[key] >= 0}
 
 
 def build_run_summary(record, directory, citation_check, job):

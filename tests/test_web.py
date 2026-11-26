@@ -152,11 +152,12 @@ if sys.argv[3] == 'start':
 
 
 @pytest.mark.parametrize(
-    ("payload", "boundary", "model_calls_before", "replays_after"),
-    [({}, "report", 2, 0), ({"recovery_point": "receipt"}, "receipt", 1, 1)],
+    ("payload", "boundary", "model_calls_before", "replays_after", "retries_after"),
+    [({}, "report", 2, 0, 0), ({"recovery_point": "receipt"}, "receipt", 1, 1, 0),
+     ({"recovery_point": "evidence"}, "evidence", 1, 0, 1)],
 )
 def test_offline_recovery_demo_resumes_after_web_server_restart(tmp_path, payload, boundary,
-                                                               model_calls_before, replays_after):
+                                                               model_calls_before, replays_after, retries_after):
     base_url = "http://127.0.0.1"
     with TestClient(web.create_app(tmp_path), base_url=base_url) as client:
         assert client.post("/api/runs", json={"mode": "recovery_demo", "question": "Custom"}).status_code == 422
@@ -171,7 +172,8 @@ def test_offline_recovery_demo_resumes_after_web_server_restart(tmp_path, payloa
         assert stopped["report"] is None
         assert stopped["metrics"]["model_calls"] == model_calls_before
         assert stopped["recovery_demo_boundary"] == boundary
-        before = dict(model_calls=model_calls_before, tool_calls=1, recovery_replays=0)
+        before = dict(model_calls=model_calls_before, tool_calls=1, recovery_replays=0,
+                      retry_count=0, evidence_count=1)
         assert stopped["recovery_demo_before"] == before
         assert stopped["metrics"]["tool_calls"] == 1
         assert stopped["metrics"]["provider_requests"] == 0
@@ -179,6 +181,9 @@ def test_offline_recovery_demo_resumes_after_web_server_restart(tmp_path, payloa
         marker = json.loads((tmp_path / "jobs" / run_id / "recovery-demo-fault.json").read_text(encoding="utf-8"))
         assert marker["run_id"] == run_id and marker["point"] == boundary
         assert marker["before"] == before
+        evidence_path = tmp_path / "research" / run_id / "evidence.jsonl"
+        original_evidence = [json.loads(line) for line in evidence_path.read_text(encoding="utf-8").splitlines()]
+        assert len(original_evidence) == 1
 
     with TestClient(web.create_app(tmp_path), base_url=base_url) as restarted:
         assert restarted.get("/api/runs").json()["allow_live"] is False
@@ -188,11 +193,16 @@ def test_offline_recovery_demo_resumes_after_web_server_restart(tmp_path, payloa
         assert done["resume_count"] == 1
         assert done["metrics"] == {
             **stopped["metrics"], "model_calls": 2, "recovery_replays": replays_after,
+            "retry_count": retries_after, "tool_success_rate": 1, "tool_successes": 1,
+            "evidence_count": 1,
         }
         summary = restarted.get(f"/api/runs/{run_id}/run-summary.json").json()
         assert summary["recovery_demo_before"] == before
         assert summary["recovery_demo_boundary"] == boundary
         assert done["recovery_demo_injected"]
+        restored_evidence = [json.loads(line) for line in evidence_path.read_text(encoding="utf-8").splitlines()]
+        assert restored_evidence == original_evidence
+        assert list(done["evidence"]) == [original_evidence[0]["id"]]
         assert done["citation_check"] == dict(total=1, matched=1, mismatched=0, missing=0)
         assert restarted.get(f"/api/runs/{run_id}/report.zip").status_code == 200
 
@@ -218,7 +228,7 @@ def test_model_response_demo_keeps_original_budget(tmp_path, budget, outcome, mo
         assert stopped["status"] == "interrupted" and stopped["can_resume"]
         assert stopped["recovery_demo_injected"] and stopped["recovery_demo_boundary"] == "model_response"
         assert stopped["model_limit"] == budget
-        before = dict(model_calls=1, tool_calls=0, recovery_replays=0)
+        before = dict(model_calls=1, tool_calls=0, recovery_replays=0, retry_count=0, evidence_count=0)
         assert stopped["recovery_demo_before"] == before
 
         assert client.post(f"/api/runs/{run_id}/resume").status_code == 202
@@ -226,7 +236,7 @@ def test_model_response_demo_keeps_original_budget(tmp_path, budget, outcome, mo
         assert done["status"] == outcome and done["id"] == run_id
         assert done["model_limit"] == budget and done["resume_count"] == 1
         assert done["metrics"]["model_calls"] == model_calls
-        assert done["metrics"]["tool_calls"] == tool_calls
+        assert done["metrics"]["tool_calls"] == done["metrics"]["evidence_count"] == tool_calls
         assert done["metrics"]["provider_requests"] == 0
         assert done["recovery_demo_before"] == before
         report = client.get(f"/api/runs/{run_id}/report.zip")

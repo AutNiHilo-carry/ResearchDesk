@@ -9,7 +9,7 @@ def run_metrics(directory):
     return metrics
 
 
-def run_metrics_snapshot(directory):
+def run_metrics_snapshot(directory, *, count_evidence=False):
     path = directory / "application.sqlite3"
     if not path.exists():
         return {"model_calls": None, "total_tokens": None, "tool_success_rate": None, "retry_count": None}, []
@@ -20,9 +20,13 @@ def run_metrics_snapshot(directory):
                   connection.execute("SELECT id,payload FROM events ORDER BY id")]
         operations = list(connection.execute("SELECT id,attempts,result FROM dispatches"))
         counters = dict(connection.execute("SELECT name,value FROM counters"))
+        evidence = connection.execute("SELECT COUNT(*) FROM records WHERE kind='evidence'").fetchone()[0] if count_evidence else None
     finally:
         connection.close()
-    return metrics_from_rows([event for _, event in events], operations, counters), events
+    metrics = metrics_from_rows([event for _, event in events], operations, counters)
+    if count_evidence:
+        metrics["evidence_count"] = evidence
+    return metrics, events
 
 
 def metrics_from_rows(events, operations, counters):
