@@ -250,6 +250,50 @@ function renderActivity(run) {
   }
 }
 
+const comparisonMetrics = ["model_calls", "tool_calls", "retry_count", "recovery_replays", "evidence_count"];
+
+async function refreshComparison() {
+  const button = byId("refresh-comparison");
+  if (button.disabled) return;
+  button.disabled = true;
+  const message = byId("comparison-message");
+  message.hidden = false;
+  message.textContent = "正在读取演示记录…";
+  try {
+    const { cases } = await request("/api/recovery-comparison");
+    const rows = byId("comparison-rows");
+    rows.replaceChildren();
+    for (const scenario of cases) {
+      const row = rows.insertRow();
+      const label = document.createElement("th");
+      label.scope = "row";
+      label.textContent = recoveryBoundaries[scenario.boundary];
+      row.append(label);
+      row.insertCell().textContent = scenario.model_limit;
+      const status = row.insertCell();
+      if (scenario.run) {
+        const link = document.createElement("a");
+        link.href = "#" + scenario.run.id;
+        link.textContent = states[scenario.run.status];
+        status.append(link);
+      } else {
+        status.textContent = "尚无已结束的恢复记录";
+      }
+      for (const key of comparisonMetrics) {
+        row.insertCell().textContent = scenario.run
+          ? (scenario.run.before?.[key] ?? "—") + " → " + (scenario.run.after[key] ?? "—")
+          : "—";
+      }
+    }
+    byId("comparison-scroll").hidden = false;
+    message.hidden = true;
+  } catch {
+    message.textContent = "暂时无法读取对照记录，请刷新重试。";
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function renderOutcome(run) {
   const panel = byId("run-outcome");
   panel.hidden = !["failed", "interrupted", "budget_exhausted"].includes(run.status);
@@ -437,6 +481,10 @@ async function changeRun(path, data) {
   }
 }
 
+byId("refresh-comparison").addEventListener("click", refreshComparison);
+byId("recovery-comparison").addEventListener("toggle", (event) => {
+  if (event.currentTarget.open) void refreshComparison();
+});
 byId("locate-citation-issue").addEventListener("click", () => document.querySelector(issueSelector)?.focus());
 byId("back-to-citation").addEventListener("click", () => activeCitation?.focus());
 byId("history-search").addEventListener("input", renderHistory);

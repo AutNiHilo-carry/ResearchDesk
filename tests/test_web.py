@@ -26,6 +26,15 @@ def wait_for(client, run_id, ready, timeout=45):
     raise AssertionError(f"Run did not reach expected state: {record}")
 
 
+def comparison_result(client, boundary, budget):
+    response = client.get("/api/recovery-comparison")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    cases = response.json()["cases"]
+    assert len(cases) == 5
+    return next(case["run"] for case in cases if (case["boundary"], case["model_limit"]) == (boundary, budget))
+
+
 def test_offline_demo_serves_assets_and_resolves_report_citations(tmp_path, monkeypatch):
     with TestClient(web.create_app(tmp_path), base_url="http://127.0.0.1") as client:
         page = client.get("/").text
@@ -78,6 +87,7 @@ def test_offline_demo_serves_assets_and_resolves_report_citations(tmp_path, monk
         assert done["citation_check"] == dict(total=1, matched=1, mismatched=0, missing=0)
         assert done["evidence"][eid]["integrity"] == "valid"
         assert done["metrics"]["provider_requests"] == 0
+        assert comparison_result(client, "report", 3) is None
 
         report, evidence, sources, metadata = web.load_run(tmp_path / "research" / run_id)
         evidence[eid]["snippet"] = "An excerpt absent from the source."
@@ -181,6 +191,7 @@ def test_offline_recovery_demo_resumes_after_web_server_restart(tmp_path, payloa
         marker = json.loads((tmp_path / "jobs" / run_id / "recovery-demo-fault.json").read_text(encoding="utf-8"))
         assert marker["run_id"] == run_id and marker["point"] == boundary
         assert marker["before"] == before
+        assert comparison_result(client, boundary, 3) is None
         evidence_path = tmp_path / "research" / run_id / "evidence.jsonl"
         original_evidence = [json.loads(line) for line in evidence_path.read_text(encoding="utf-8").splitlines()]
         assert len(original_evidence) == 1
@@ -199,6 +210,10 @@ def test_offline_recovery_demo_resumes_after_web_server_restart(tmp_path, payloa
         summary = restarted.get(f"/api/runs/{run_id}/run-summary.json").json()
         assert summary["recovery_demo_before"] == before
         assert summary["recovery_demo_boundary"] == boundary
+        assert comparison_result(restarted, boundary, 3) == {
+            "id": run_id, "status": "completed", "before": before,
+            "after": {key: done["metrics"][key] for key in before},
+        }
         assert done["recovery_demo_injected"]
         restored_evidence = [json.loads(line) for line in evidence_path.read_text(encoding="utf-8").splitlines()]
         assert restored_evidence == original_evidence
@@ -239,6 +254,10 @@ def test_model_response_demo_keeps_original_budget(tmp_path, budget, outcome, mo
         assert done["metrics"]["tool_calls"] == done["metrics"]["evidence_count"] == tool_calls
         assert done["metrics"]["provider_requests"] == 0
         assert done["recovery_demo_before"] == before
+        compared = comparison_result(client, "model_response", budget)
+        assert compared["id"] == run_id and compared["status"] == outcome
+        assert compared["before"] == before
+        assert compared["after"] == {key: done["metrics"][key] for key in before}
         report = client.get(f"/api/runs/{run_id}/report.zip")
         assert report.status_code == (200 if outcome == "completed" else 409)
         if outcome == "budget_exhausted":

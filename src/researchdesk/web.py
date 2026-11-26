@@ -31,6 +31,8 @@ from .verification import evidence_context, load_run
 ID = re.compile(r"[0-9a-f]{32}")
 STATIC = Path(__file__).with_name("static")
 LIVE_MODES = {"local", "web"}
+RECOVERY_CASES = (("report", 3), ("receipt", 3), ("evidence", 3), ("model_response", 3), ("model_response", 1))
+COMPARISON_METRICS = ("model_calls", "tool_calls", "retry_count", "recovery_replays", "evidence_count")
 RECOVERY_DEMO_NOTES = "ResearchDesk saves source evidence before publishing the report."
 WORKER = "from researchdesk.web import worker; import sys; raise SystemExit(worker(*sys.argv[1:]))"
 
@@ -172,6 +174,12 @@ class Runs:
                     error_type=metadata.get("error_type"),
                     exit_code=attempt.get("exit_code"), resume_count=metadata.get("resume_count", 0),
                     model_limit=(metadata.get("model_policy") or {}).get("max_calls"))
+
+    def history(self):
+        with self.lock:
+            items = [self.overview(self.job(job.name)) for job in self.jobs.iterdir()
+                     if ID.fullmatch(job.name) and (job / "job.json").is_file()]
+        return sorted(items, key=lambda row: (row["created_at"], row["id"]), reverse=True)
 
     def ensure_idle(self):
         if any(self.running(other) for other in self.jobs.iterdir()
@@ -342,10 +350,30 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
 
     @app.get("/api/runs")
     def history():
-        with runs.lock:
-            items = [runs.overview(runs.job(job.name)) for job in runs.jobs.iterdir()
-                     if ID.fullmatch(job.name) and (job / "job.json").is_file()]
-        return dict(allow_live=runs.allow_live, runs=sorted(items, key=lambda row: row["created_at"], reverse=True))
+        return dict(allow_live=runs.allow_live, runs=runs.history())
+
+    @app.get("/api/recovery-comparison")
+    def recovery_comparison():
+        latest = {}
+        for record in runs.history():
+            if (record["mode"] != "recovery_demo" or not record["recovery_demo_injected"]
+                    or not record["resume_count"] or record["status"] not in {"completed", "budget_exhausted", "failed"}):
+                continue
+            key = (record["recovery_demo_boundary"], record["model_limit"])
+            latest.setdefault(key, record)
+
+        cases = []
+        for boundary, budget in RECOVERY_CASES:
+            record = latest.get((boundary, budget))
+            result = None
+            if record:
+                run_id = record["id"]
+                metrics, _ = read_run_observability(child_run_path(runs.research, run_id))
+                result = dict(id=run_id, status=record["status"],
+                              before=recovery_demo_before(record, runs.job(run_id)),
+                              after={key: metrics[key] for key in COMPARISON_METRICS})
+            cases.append(dict(boundary=boundary, model_limit=budget, run=result))
+        return JSONResponse({"cases": cases}, headers={"Cache-Control": "no-store"})
 
     @app.post("/api/runs", status_code=202)
     def start(request: ResearchRequest):

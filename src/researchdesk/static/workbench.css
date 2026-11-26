@@ -83,6 +83,11 @@ input[type="number"] { width: 8rem; }
 .metrics dt { color: var(--muted); font-size: .875rem; }
 .metrics dd { margin: .24rem 0 0; font-size: 1.15rem; font-weight: 700; }
 .metrics .metric-note { color: var(--muted); font-size: .8rem; font-weight: 400; }
+#recovery-comparison { margin-top: 1rem; }
+#recovery-comparison summary { cursor: pointer; font-weight: 650; }
+#comparison-scroll table { min-width: 58rem; }
+#comparison-scroll tbody td:not(:first-child) { white-space: nowrap; }
+#refresh-comparison { margin-top: .65rem; font-size: .875rem; }
 #run-activity { margin-bottom: 1rem; padding: .8rem 1rem; }
 #activity-summary { cursor: pointer; font-weight: 650; }
 #activity-events { margin: .65rem 0 0; padding-inline-start: 1.35rem; color: var(--muted); font-size: .875rem; }

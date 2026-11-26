@@ -70,6 +70,29 @@
             <button id="start" class="primary" type="submit" disabled>运行离线示例</button>
           </div>
         </form>
+        <details id="recovery-comparison" class="surface">
+          <summary>离线恢复对照</summary>
+          <p class="help">每种场景显示最近一条已结束的恢复演示。数值按中断前 → 恢复后显示。</p>
+          <div id="comparison-scroll" class="table-scroll" tabindex="0" role="region" aria-label="离线恢复对照表" hidden>
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">中断位置</th>
+                  <th scope="col">模型预算</th>
+                  <th scope="col">恢复结果</th>
+                  <th scope="col">模型调用</th>
+                  <th scope="col">工具调用</th>
+                  <th scope="col">工具再次执行</th>
+                  <th scope="col">结果复用</th>
+                  <th scope="col">台账证据</th>
+                </tr>
+              </thead>
+              <tbody id="comparison-rows"></tbody>
+            </table>
+          </div>
+          <p id="comparison-message" class="help" role="status" hidden></p>
+          <button id="refresh-comparison" class="secondary" type="button">刷新对照</button>
+        </details>
       </section>
 
       <section id="detail" aria-labelledby="run-title" hidden>
