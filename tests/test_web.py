@@ -197,6 +197,45 @@ def test_offline_recovery_demo_resumes_after_web_server_restart(tmp_path, payloa
         assert restarted.get(f"/api/runs/{run_id}/report.zip").status_code == 200
 
 
+@pytest.mark.parametrize(
+    ("budget", "outcome", "model_calls", "tool_calls"),
+    [(3, "completed", 3, 1), (1, "budget_exhausted", 1, 0)],
+)
+def test_model_response_demo_keeps_original_budget(tmp_path, budget, outcome, model_calls, tool_calls):
+    with TestClient(web.create_app(tmp_path), base_url="http://127.0.0.1") as client:
+        assert client.post("/api/runs", json={
+            "mode": "recovery_demo", "recovery_point": "report", "recovery_budget": 1,
+        }).status_code == 422
+        assert client.post("/api/runs", json={
+            "mode": "recovery_demo", "recovery_point": "model_response", "recovery_budget": 2,
+        }).status_code == 422
+        created = client.post("/api/runs", json={
+            "mode": "recovery_demo", "recovery_point": "model_response", "recovery_budget": budget,
+        })
+        assert created.status_code == 202
+        run_id = created.json()["id"]
+        stopped = wait_for(client, run_id, lambda row: row["status"] == "interrupted")
+        assert stopped["status"] == "interrupted" and stopped["can_resume"]
+        assert stopped["recovery_demo_injected"] and stopped["recovery_demo_boundary"] == "model_response"
+        assert stopped["model_limit"] == budget
+        before = dict(model_calls=1, tool_calls=0, recovery_replays=0)
+        assert stopped["recovery_demo_before"] == before
+
+        assert client.post(f"/api/runs/{run_id}/resume").status_code == 202
+        done = wait_for(client, run_id, lambda row: row["status"] in {"completed", "budget_exhausted"})
+        assert done["status"] == outcome and done["id"] == run_id
+        assert done["model_limit"] == budget and done["resume_count"] == 1
+        assert done["metrics"]["model_calls"] == model_calls
+        assert done["metrics"]["tool_calls"] == tool_calls
+        assert done["metrics"]["provider_requests"] == 0
+        assert done["recovery_demo_before"] == before
+        report = client.get(f"/api/runs/{run_id}/report.zip")
+        assert report.status_code == (200 if outcome == "completed" else 409)
+        if outcome == "budget_exhausted":
+            assert done["report"] is None and not done["can_resume"]
+            assert any(event["event"] == "model_budget_denied" for event in done["activity"])
+
+
 def test_atomic_state_update_retries_windows_reader_conflict(tmp_path, monkeypatch):
     path = tmp_path / "run.json"
     path.write_text('{"status":"running"}', encoding="utf-8")

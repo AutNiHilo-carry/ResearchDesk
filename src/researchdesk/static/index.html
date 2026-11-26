@@ -44,6 +44,14 @@
             <select id="recovery-point">
               <option value="report">报告写入后</option>
               <option value="receipt">工具结果写入后</option>
+              <option value="model_response">模型响应返回后、写入检查点前</option>
+            </select>
+          </div>
+          <div id="recovery-budget-fields" hidden>
+            <label for="recovery-budget">模型调用预算</label>
+            <select id="recovery-budget">
+              <option value="3">3 次，允许恢复后重新请求</option>
+              <option value="1">1 次，恢复后预算已用完</option>
             </select>
           </div>
           <p id="mode-help" class="help">使用固定资料演示报告与证据，无外部 API 请求。</p>

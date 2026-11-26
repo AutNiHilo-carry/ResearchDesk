@@ -10,7 +10,11 @@ const historyDate = new Intl.DateTimeFormat("zh-CN", {
   hour: "2-digit", minute: "2-digit", hourCycle: "h23",
 });
 const percent = new Intl.NumberFormat("zh-CN", { style: "percent", maximumFractionDigits: 1 });
-const recoveryBoundaries = { report: "报告写入后", receipt: "工具结果写入后" };
+const recoveryBoundaries = {
+  report: "报告写入后",
+  receipt: "工具结果写入后",
+  model_response: "模型响应返回后、写入检查点前",
+};
 const modes = { recovery_demo: "离线恢复演示", demo: "离线示例", local: "本地资料", web: "网页研究" };
 const messages = {
   403: "真实研究未启用，请使用离线示例或重新启动服务。",
@@ -85,6 +89,8 @@ function setMode() {
   const mode = byId("mode").value;
   const live = mode === "local" || mode === "web";
   byId("recovery-point-fields").hidden = mode !== "recovery_demo";
+  byId("recovery-budget-fields").hidden = mode !== "recovery_demo" ||
+    byId("recovery-point").value !== "model_response";
   byId("question-fields").hidden = !live;
   byId("question").required = live;
   byId("source-fields").hidden = mode !== "local";
@@ -307,11 +313,14 @@ function renderRun(run) {
   if (!demo.hidden) {
     const boundary = recoveryBoundaries[run.recovery_demo_boundary] || recoveryBoundaries.report;
     demo.textContent = "离线恢复演示 · " + boundary + "中断";
-    if (run.resume_count && run.status === "completed") {
-      demo.textContent += "。已用原运行 ID 恢复并发布报告。";
+    if (run.resume_count && ["completed", "budget_exhausted"].includes(run.status)) {
+      demo.textContent += run.status === "completed"
+        ? "。已用原运行 ID 恢复并发布报告。"
+        : "。原运行的模型预算已用完，恢复在发起下一次请求前停止。";
       const before = run.recovery_demo_before;
       if (before && Number.isInteger(run.metrics.tool_calls) && Number.isInteger(run.metrics.recovery_replays)) {
-        demo.textContent += "工具调用 " + before.tool_calls + " → " + run.metrics.tool_calls +
+        demo.textContent += "模型调用 " + before.model_calls + " → " + run.metrics.model_calls +
+          "，工具调用 " + before.tool_calls + " → " + run.metrics.tool_calls +
           "，已记录结果复用 " + before.recovery_replays + " → " + run.metrics.recovery_replays + "。";
       }
     }
@@ -432,15 +441,18 @@ for (const [status, label] of Object.entries(states)) {
 historyStatus.addEventListener("change", renderHistory);
 byId("compose").addEventListener("click", () => showRun(null));
 byId("mode").addEventListener("change", setMode);
+byId("recovery-point").addEventListener("change", setMode);
 byId("research-form").addEventListener("submit", (event) => {
   event.preventDefault();
   const mode = byId("mode").value;
-  const data = mode === "demo" ? { mode }
-    : mode === "recovery_demo" ? { mode, recovery_point: byId("recovery-point").value }
-    : {
-    mode, question: byId("question").value, notes: mode === "local" ? byId("notes").value : "",
-    max_model_calls: Number(byId("budget").value),
-  };
+  let data = { mode };
+  if (mode === "recovery_demo") {
+    data.recovery_point = byId("recovery-point").value;
+    if (data.recovery_point === "model_response") data.recovery_budget = Number(byId("recovery-budget").value);
+  } else if (mode !== "demo") {
+    data = { mode, question: byId("question").value, notes: mode === "local" ? byId("notes").value : "",
+      max_model_calls: Number(byId("budget").value) };
+  }
   void changeRun("/api/runs", data);
 });
 byId("stop").addEventListener("click", () => latest && changeRun(`/api/runs/${latest.id}/stop`));

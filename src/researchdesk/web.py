@@ -40,7 +40,8 @@ class ResearchRequest(BaseModel):
     mode: Literal["demo", "recovery_demo", "local", "web"] = "demo"
     question: str = Field(default="", max_length=4000)
     notes: str = Field(default="", max_length=50000)
-    recovery_point: Literal["report", "receipt"] | None = None
+    recovery_point: Literal["report", "receipt", "model_response"] | None = None
+    recovery_budget: Literal[1, 3] | None = None
     max_model_calls: int = Field(default=6, ge=1, le=12)
 
     @model_validator(mode="after")
@@ -51,6 +52,8 @@ class ResearchRequest(BaseModel):
             raise ValueError("The offline recovery demo uses a fixed question.")
         if self.recovery_point is not None and self.mode != "recovery_demo":
             raise ValueError("Recovery points are only available for the offline recovery demo.")
+        if self.recovery_budget is not None and (self.mode != "recovery_demo" or self.recovery_point != "model_response"):
+            raise ValueError("A demo budget can only be selected for the model response boundary.")
         if self.mode == "local" and not self.notes:
             raise ValueError("Local research requires source notes.")
         if self.mode != "local" and self.notes:
@@ -357,7 +360,7 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
             question = "离线恢复演示" if recovery_demo else request.question or "证据台账示例"
             save_json(job / "job.json", dict(mode=request.mode, question=question,
                                             recovery_point=(request.recovery_point or "report") if recovery_demo else None,
-                                            max_model_calls=3 if recovery_demo else request.max_model_calls,
+                                            max_model_calls=(request.recovery_budget or 3) if recovery_demo else request.max_model_calls,
                                             created_at=now()))
             runs.launch(job, "start")
             return runs.overview(job)
