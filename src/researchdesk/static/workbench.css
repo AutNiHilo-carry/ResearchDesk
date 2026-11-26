@@ -79,6 +79,7 @@ input[type="number"] { width: 8rem; }
 .metrics div { background: var(--wash); border: 1px solid var(--line); border-radius: 10px; padding: .8rem; }
 .metrics dt { color: var(--muted); font-size: .875rem; }
 .metrics dd { margin: .24rem 0 0; font-size: 1.15rem; font-weight: 700; }
+.metrics .metric-note { color: var(--muted); font-size: .8rem; font-weight: 400; }
 #run-activity { margin-bottom: 1rem; padding: .8rem 1rem; }
 #activity-summary { cursor: pointer; font-weight: 650; }
 #activity-events { margin: .65rem 0 0; padding-inline-start: 1.35rem; color: var(--muted); font-size: .875rem; }

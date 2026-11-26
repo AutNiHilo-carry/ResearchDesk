@@ -307,7 +307,9 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
             else:
                 citation_check["mismatched"] += 1
         return dict(**record, report=report, evidence=citations, citation_check=citation_check, activity=activity,
-                    metrics={key: metrics.get(key) for key in ("model_calls", "tool_calls", "provider_requests")})
+                    metrics={key: metrics.get(key) for key in
+                             ("model_calls", "tool_calls", "provider_requests", "tool_successes",
+                              "tool_outcomes", "tool_success_rate", "retry_count", "recovery_replays")})
 
     @app.get("/api/runs/{run_id}/report.zip", response_class=Response)
     def export_report(run_id: str):

@@ -9,6 +9,7 @@ const historyDate = new Intl.DateTimeFormat("zh-CN", {
   year: "numeric", month: "2-digit", day: "2-digit",
   hour: "2-digit", minute: "2-digit", hourCycle: "h23",
 });
+const percent = new Intl.NumberFormat("zh-CN", { style: "percent", maximumFractionDigits: 1 });
 const modes = { demo: "离线示例", local: "本地资料", web: "网页研究" };
 const messages = {
   403: "真实研究未启用，请使用离线示例或重新启动服务。",
@@ -247,6 +248,11 @@ function renderRun(run) {
     ? `${run.metrics.model_calls ?? "—"} / ${run.model_limit}` : run.metrics.model_calls ?? "—";
   byId("tool-calls").textContent = run.metrics.tool_calls ?? "—";
   byId("provider-requests").textContent = run.metrics.provider_requests ?? "—";
+  const { tool_success_rate, tool_successes, tool_outcomes, retry_count, recovery_replays } = run.metrics;
+  byId("tool-success-rate").textContent = Number.isFinite(tool_success_rate) ? percent.format(tool_success_rate) : "—";
+  byId("tool-outcomes").textContent = tool_outcomes ? tool_successes + " / " + tool_outcomes + " 已计入" : "";
+  byId("tool-retries").textContent = retry_count ?? "—";
+  byId("tool-replays").textContent = recovery_replays ?? "—";
   syncRunActions();
   const check = run.citation_check;
   const summary = byId("citation-check");

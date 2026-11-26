@@ -106,7 +106,14 @@ if sys.argv[3] == 'start':
         assert client.post(f"/api/runs/{run_id}/resume").status_code == 202
         done = wait_for(client, run_id, lambda item: item["status"] == "completed")
         assert done["id"] == run_id and done["resume_count"] == 1 and done["status"] == "completed"
-        assert done["metrics"] == parked["metrics"] == dict(model_calls=2, tool_calls=1, provider_requests=0)
+        for snapshot in (parked, done):
+            assert {key: snapshot["metrics"][key] for key in ("model_calls", "tool_calls", "provider_requests")} == {
+                "model_calls": 2, "tool_calls": 1, "provider_requests": 0,
+            }
+        assert done["metrics"]["tool_successes"] == done["metrics"]["tool_outcomes"] == 1
+        assert done["metrics"]["tool_success_rate"] == 1
+        assert done["metrics"]["retry_count"] == 0
+        assert done["metrics"]["recovery_replays"] == 0
         assert done["report"] and done["evidence"]
         activity = done["activity"]
         assert 1 <= len(activity) <= 8
