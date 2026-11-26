@@ -248,6 +248,18 @@ def summarize_citations(report, citations):
     return citation_check
 
 
+def build_run_summary(record, directory, citation_check):
+    metrics, activity = read_run_observability(directory)
+    return {
+        "schema_version": 1,
+        **{key: record[key] for key in ("id", "mode", "created_at", "status", "resume_count",
+                                       "model_limit", "exit_code", "error_type")},
+        "metrics": metrics,
+        "citation_check": citation_check,
+        "recent_activity": activity,
+    }
+
+
 def create_app(output=Path("runs/web"), *, allow_live=False):
     runs = Runs(Path(output), allow_live)
 
@@ -321,6 +333,24 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
         return dict(**record, report=report, evidence=citations, citation_check=summarize_citations(report, citations),
                     activity=activity, metrics=metrics)
 
+    @app.get("/api/runs/{run_id}/run-summary.json")
+    def export_run_summary(run_id: str):
+        record = runs.overview(runs.job(run_id))
+        directory = child_run_path(runs.research, run_id)
+        citation_check = None
+        if record["status"] == "completed":
+            try:
+                report, citations = read_completed_report(directory)
+            except HTTPException as error:
+                if error.status_code != 409:
+                    raise
+            else:
+                citation_check = summarize_citations(report, citations)
+        return JSONResponse(build_run_summary(record, directory, citation_check), headers={
+            "Content-Disposition": f'attachment; filename="researchdesk-{run_id}-summary.json"',
+            "Cache-Control": "no-store",
+        })
+
     @app.get("/api/runs/{run_id}/report.zip", response_class=Response)
     def export_report(run_id: str):
         job = runs.job(run_id)
@@ -329,14 +359,7 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
             raise HTTPException(409, "The report is available after the run completes.")
         directory = child_run_path(runs.research, run_id)
         report, citations = read_completed_report(directory)
-        metrics, activity = read_run_observability(directory)
-        summary = {
-            "schema_version": 1,
-            **{key: record[key] for key in ("id", "mode", "created_at", "status", "resume_count", "model_limit")},
-            "metrics": metrics,
-            "citation_check": summarize_citations(report, citations),
-            "recent_activity": activity,
-        }
+        summary = build_run_summary(record, directory, summarize_citations(report, citations))
         archive = BytesIO()
         with ZipFile(archive, "w", compression=ZIP_DEFLATED) as bundle:
             bundle.writestr("report.md", report_with_evidence(report, citations))

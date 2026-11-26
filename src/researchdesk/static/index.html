@@ -63,7 +63,8 @@
           </div>
           <span id="run-status" class="status" aria-live="polite"></span>
         </header>
-        <div id="run-actions" class="actions" hidden>
+        <div class="actions">
+          <a id="download-summary" class="secondary run-download" download hidden>下载运行摘要</a>
           <button id="stop" class="secondary" type="button" hidden>中断运行</button>
           <button id="resume" class="primary" type="button" hidden>恢复运行</button>
           <span id="resume-count" class="muted"></span>
@@ -88,7 +89,7 @@
           <article class="surface report">
             <div class="report-header">
               <h2>研究报告</h2>
-              <a id="download-report" class="secondary" download hidden>下载报告与证据</a>
+              <a id="download-report" class="secondary run-download" download hidden>下载报告与证据</a>
             </div>
             <p id="citation-check" class="help" hidden></p>
             <button id="locate-citation-issue" class="secondary" type="button" hidden>定位首个问题引用</button>

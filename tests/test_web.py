@@ -63,11 +63,16 @@ def test_offline_demo_serves_assets_and_resolves_report_citations(tmp_path, monk
             summary = json.loads(bundle.read("run-summary.json"))
             assert summary == {
                 "schema_version": 1,
-                **{key: done[key] for key in ("id", "mode", "created_at", "status", "resume_count", "model_limit")},
+                **{key: done[key] for key in ("id", "mode", "created_at", "status", "resume_count", "model_limit", "exit_code", "error_type")},
                 "metrics": done["metrics"],
                 "citation_check": done["citation_check"],
                 "recent_activity": done["activity"],
             }
+        standalone = client.get(f"/api/runs/{run_id}/run-summary.json")
+        assert standalone.status_code == 200 and standalone.json() == summary
+        assert standalone.headers["cache-control"] == "no-store"
+        assert standalone.headers["content-disposition"] == f'attachment; filename="researchdesk-{run_id}-summary.json"'
+
         assert done["citation_check"] == dict(total=1, matched=1, mismatched=0, missing=0)
         assert done["evidence"][eid]["integrity"] == "valid"
         assert done["metrics"]["provider_requests"] == 0
@@ -106,11 +111,19 @@ if sys.argv[3] == 'start':
         run_id = started.json()["id"]
         parked = wait_for(client, run_id, lambda _: (tmp_path / "ready.json").is_file())
         assert parked["status"] == "running" and parked["report"] is None
+        running_summary = client.get(f"/api/runs/{run_id}/run-summary.json").json()
+        assert running_summary["status"] == "running" and running_summary["citation_check"] is None
+        assert running_summary["metrics"] == parked["metrics"]
         assert client.get(f"/api/runs/{run_id}/report.zip").status_code == 409
         assert client.post("/api/runs", json={"mode": "demo"}).status_code == 409
         assert len(client.get("/api/runs").json()["runs"]) == 1
         stopped = client.post(f"/api/runs/{run_id}/stop").json()
         assert stopped["status"] == "interrupted" and stopped["can_resume"]
+        stopped_summary = client.get(f"/api/runs/{run_id}/run-summary.json").json()
+        assert stopped_summary["status"] == "interrupted" and stopped_summary["citation_check"] is None
+        assert stopped_summary["exit_code"] == stopped["exit_code"]
+        assert stopped_summary["metrics"] == running_summary["metrics"]
+        assert stopped_summary["recent_activity"] == running_summary["recent_activity"]
         assert client.post(f"/api/runs/{run_id}/resume").status_code == 202
         done = wait_for(client, run_id, lambda item: item["status"] == "completed")
         assert done["id"] == run_id and done["resume_count"] == 1 and done["status"] == "completed"

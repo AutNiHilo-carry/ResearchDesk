@@ -64,13 +64,18 @@ function syncRunActions() {
   byId("start").disabled = !connected || submitting || active;
   byId("stop").disabled = !connected || submitting || !latest?.can_stop;
   byId("resume").disabled = !connected || submitting || !latest?.can_resume;
-  const download = byId("download-report");
-  download.hidden = latest?.status !== "completed" || !latest.report;
+  syncDownload("download-summary", "run-summary.json", Boolean(latest));
+  syncDownload("download-report", "report.zip", latest?.status === "completed" && Boolean(latest.report));
+}
+
+function syncDownload(elementId, filename, available) {
+  const download = byId(elementId);
+  download.hidden = !available;
   if (download.hidden || !connected) {
     download.removeAttribute("href");
     download.setAttribute("aria-disabled", "true");
   } else {
-    download.href = "/api/runs/" + encodeURIComponent(latest.id) + "/report.zip";
+    download.href = "/api/runs/" + encodeURIComponent(latest.id) + "/" + filename;
     download.removeAttribute("aria-disabled");
   }
 }
@@ -242,7 +247,7 @@ function renderRun(run) {
   byId("run-status").dataset.state = run.status;
   byId("stop").hidden = !run.can_stop;
   byId("resume").hidden = !run.can_resume;
-  byId("run-actions").hidden = !run.can_stop && !run.can_resume && !run.resume_count;
+  byId("resume-count").hidden = !run.resume_count;
   byId("resume-count").textContent = run.resume_count ? `已恢复 ${run.resume_count} 次` : "";
   byId("model-calls").textContent = run.model_limit
     ? `${run.metrics.model_calls ?? "—"} / ${run.model_limit}` : run.metrics.model_calls ?? "—";
