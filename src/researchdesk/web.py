@@ -25,7 +25,7 @@ from .citations import CITATION
 from .ledger import now
 from .run_metrics import run_metrics
 from .storage import RecoveryError, RunLock, atomic_text
-from .verification import load_run
+from .verification import evidence_context, load_run
 
 ID = re.compile(r"[0-9a-f]{32}")
 STATIC = Path(__file__).with_name("static")
@@ -196,6 +196,9 @@ def read_completed_report(directory):
         location = source.get("location") or ""
         citations[eid] = dict(claim=item["claim"], snippet=item["snippet"],
             title=source.get("title"), location=Path(location).name if source.get("kind") == "local" else location)
+    for eid in dict.fromkeys(CITATION.findall(report)):
+        if eid in citations:
+            citations[eid]["integrity"] = evidence_context(eid, evidence, sources)["integrity"]
     return report, citations
 
 
@@ -287,7 +290,17 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
         report, citations = None, {}
         if record["status"] == "completed":
             report, citations = read_completed_report(directory)
-        return dict(**record, report=report, evidence=citations,
+        cited_ids = set(CITATION.findall(report or ""))
+        citation_check = dict(total=len(cited_ids), matched=0, mismatched=0, missing=0)
+        for eid in cited_ids:
+            item = citations.get(eid)
+            if item is None:
+                citation_check["missing"] += 1
+            elif item["integrity"] == "valid":
+                citation_check["matched"] += 1
+            else:
+                citation_check["mismatched"] += 1
+        return dict(**record, report=report, evidence=citations, citation_check=citation_check,
                     metrics={key: metrics.get(key) for key in ("model_calls", "tool_calls", "provider_requests")})
 
     @app.get("/api/runs/{run_id}/report.zip", response_class=Response)

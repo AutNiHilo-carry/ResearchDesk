@@ -84,6 +84,9 @@ function showEvidence(id, evidence, button) {
   byId("evidence-content").hidden = false;
   byId("evidence-id").textContent = id;
   byId("source-title").textContent = evidence.title || "来源摘录";
+  byId("evidence-integrity").textContent = evidence.integrity === "valid"
+    ? "摘录与来源原文匹配"
+    : "摘录原文核对未通过";
   byId("snippet").textContent = evidence.snippet;
   byId("source-name").textContent = evidence.location || "";
   const link = byId("source-link");
@@ -147,6 +150,14 @@ function renderRun(run) {
   download.hidden = run.status !== "completed" || !run.report;
   if (download.hidden) download.removeAttribute("href");
   else download.href = `/api/runs/${encodeURIComponent(run.id)}/report.zip`;
+  const check = run.citation_check;
+  const summary = byId("citation-check");
+  summary.hidden = !run.report || !check;
+  if (!summary.hidden) {
+    summary.textContent = "引用原文核对 " +
+      "· 匹配 " + check.matched + "/" + check.total +
+      " · 未通过 " + check.mismatched + " · 缺失 " + check.missing;
+  }
   renderReport(run);
   byId("editor").hidden = true;
   byId("detail").hidden = false;

@@ -26,7 +26,7 @@ def wait_for(client, run_id, ready, timeout=45):
     raise AssertionError(f"Run did not reach expected state: {record}")
 
 
-def test_offline_demo_serves_assets_and_resolves_report_citations(tmp_path):
+def test_offline_demo_serves_assets_and_resolves_report_citations(tmp_path, monkeypatch):
     with TestClient(web.create_app(tmp_path), base_url="http://127.0.0.1") as client:
         page = client.get("/").text
         assert "ResearchDesk" in page and 'id="download-report"' in page
@@ -60,7 +60,18 @@ def test_offline_demo_serves_assets_and_resolves_report_citations(tmp_path):
                 for line in exported.splitlines()
             )
             assert json.loads(bundle.read("evidence.json")) == done["evidence"]
+        assert done["citation_check"] == dict(total=1, matched=1, mismatched=0, missing=0)
+        assert done["evidence"][eid]["integrity"] == "valid"
         assert done["metrics"]["provider_requests"] == 0
+
+        report, evidence, sources, metadata = web.load_run(tmp_path / "research" / run_id)
+        evidence[eid]["snippet"] = "An excerpt absent from the source."
+        monkeypatch.setattr(web, "load_run", lambda _: (
+            report + f" [{eid}] [E0000000000000000]", evidence, sources, metadata,
+        ))
+        checked = client.get(f"/api/runs/{run_id}").json()
+        assert checked["citation_check"] == dict(total=2, matched=0, mismatched=1, missing=1)
+        assert checked["evidence"][eid]["integrity"] == "invalid"
         assert client.post(f"/api/runs/{run_id}/resume").status_code == 409
 
 
