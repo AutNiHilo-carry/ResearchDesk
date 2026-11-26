@@ -11,12 +11,14 @@ from .policy import ToolExecutor
 from .storage import atomic_text
 
 
-def install_fault(point, marker, root):
+def install_fault(point, marker, root, *, exit_code=None):
     def park(directory):
         directory = directory.resolve()
         if directory.parent != root.resolve() or not re.fullmatch("[0-9a-f]{32}", directory.name):
             raise ValueError("Fault boundary is outside this worker's run root.")
         atomic_text(marker, json.dumps(dict(point=point, run_id=directory.name, pid=os.getpid(), reached_at=now())))
+        if exit_code is not None:
+            os._exit(exit_code)
         while True:
             time.sleep(0.1)
     if point == "model_response":
@@ -81,6 +83,21 @@ def scripted_model():
     agent_module.ChatDeepSeek = lambda **kwargs: Scripted()
     os.environ["DEEPSEEK_API_KEY"] = "offline-fixture-not-a-real-key"
     os.environ["DEEPSEEK_MODEL"] = "scripted-recovery-fixture"
+
+
+def configure_workbench_demo(job, research_root, action):
+    """Configure only the dedicated offline recovery-demo subprocess."""
+    from . import cli
+
+    def offline(event, _args):
+        if event in {"socket.connect", "socket.getaddrinfo"}:
+            raise RuntimeError("The recovery demo runs offline.")
+
+    sys.addaudithook(offline)
+    cli.load_dotenv = lambda: None
+    scripted_model()
+    if action == "start":
+        install_fault("report", job / "recovery-demo-fault.json", research_root, exit_code=75)
 
 
 def main():

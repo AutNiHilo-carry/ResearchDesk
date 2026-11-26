@@ -10,7 +10,7 @@ const historyDate = new Intl.DateTimeFormat("zh-CN", {
   hour: "2-digit", minute: "2-digit", hourCycle: "h23",
 });
 const percent = new Intl.NumberFormat("zh-CN", { style: "percent", maximumFractionDigits: 1 });
-const modes = { demo: "离线示例", local: "本地资料", web: "网页研究" };
+const modes = { recovery_demo: "离线恢复演示", demo: "离线示例", local: "本地资料", web: "网页研究" };
 const messages = {
   403: "真实研究未启用，请使用离线示例或重新启动服务。",
   404: "找不到这次运行。",
@@ -82,16 +82,21 @@ function syncDownload(elementId, filename, available) {
 
 function setMode() {
   const mode = byId("mode").value;
-  byId("question-fields").hidden = mode === "demo";
-  byId("question").required = mode !== "demo";
+  const live = mode === "local" || mode === "web";
+  byId("question-fields").hidden = !live;
+  byId("question").required = live;
   byId("source-fields").hidden = mode !== "local";
   byId("notes").required = mode === "local";
   byId("mode-help").textContent = {
+    recovery_demo: "使用固定资料和离线模型，自动中断进程后可手动恢复。",
     demo: "使用固定资料演示报告与证据，无外部 API 请求。",
     local: "由模型分析你粘贴的资料，不发起网页搜索。",
     web: "提交后会调用模型服务和搜索服务。",
   }[mode];
-  byId("start").textContent = mode === "demo" ? "运行离线示例" : "开始研究";
+  byId("start").textContent = {
+    demo: "运行离线示例",
+    recovery_demo: "开始恢复演示",
+  }[mode] || "开始研究";
   syncRunActions();
 }
 
@@ -242,7 +247,9 @@ function renderOutcome(run) {
   if (panel.hidden) return;
   let reason;
   if (run.status === "interrupted") {
-    reason = run.stopped_by_workbench ? "工作台已中断运行。" : "运行已中断。";
+    reason = run.stopped_by_workbench ? "工作台已中断运行。"
+      : run.recovery_demo_injected && !run.resume_count ? "演示已在报告写入后终止进程。"
+      : "运行已中断。";
     reason += run.can_resume ? "可从已保存的状态继续。" : "当前无可用的网页恢复入口。";
   } else if (run.status === "budget_exhausted") {
     reason = "已达到模型调用上限。";
@@ -292,6 +299,13 @@ function renderRun(run) {
       "· 匹配 " + check.matched + "/" + check.total +
       " · 未通过 " + check.mismatched + " · 缺失 " + check.missing;
   }
+  const demo = byId("recovery-demo-state");
+  demo.hidden = run.mode !== "recovery_demo";
+  if (!demo.hidden) {
+    demo.textContent = run.resume_count && run.status === "completed"
+      ? "离线演示完成，已用原运行 ID 恢复并发布报告。"
+      : "离线恢复演示使用固定资料和脚本模型。";
+  }
   renderOutcome(run);
   renderActivity(run);
   renderReport(run);
@@ -315,7 +329,7 @@ async function refresh({ queueIfBusy = false } = {}) {
     connected = true;
     setConnectionLabel(snapshot.allow_live ? "本地 · 支持真实研究" : "本地 · 离线模式");
     for (const option of byId("mode").options) {
-      if (option.value !== "demo") option.disabled = !snapshot.allow_live;
+      if (option.value === "local" || option.value === "web") option.disabled = !snapshot.allow_live;
     }
     active = snapshot.runs.some((run) => run.status === "running");
     setMode();
@@ -411,7 +425,7 @@ byId("mode").addEventListener("change", setMode);
 byId("research-form").addEventListener("submit", (event) => {
   event.preventDefault();
   const mode = byId("mode").value;
-  const data = mode === "demo" ? { mode } : {
+  const data = mode === "demo" || mode === "recovery_demo" ? { mode } : {
     mode, question: byId("question").value, notes: mode === "local" ? byId("notes").value : "",
     max_model_calls: Number(byId("budget").value),
   };

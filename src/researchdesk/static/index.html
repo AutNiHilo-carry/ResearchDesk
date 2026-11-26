@@ -35,6 +35,7 @@
           <label for="mode">运行方式</label>
           <select id="mode" name="mode">
             <option value="demo">离线示例</option>
+            <option value="recovery_demo">离线恢复演示</option>
             <option value="local" disabled>基于本地资料</option>
             <option value="web" disabled>使用网页搜索</option>
           </select>
@@ -50,7 +51,7 @@
             <input id="budget" name="budget" type="number" min="1" max="12" value="6">
           </div>
           <div class="form-actions">
-            <button id="start" class="primary" type="submit">运行离线示例</button>
+            <button id="start" class="primary" type="submit" disabled>运行离线示例</button>
           </div>
         </form>
       </section>
@@ -73,6 +74,7 @@
           <p id="outcome-reason"></p>
           <p id="outcome-details" class="help" hidden></p>
         </div>
+        <p id="recovery-demo-state" class="help" hidden></p>
         <dl class="metrics" id="metrics">
           <div><dt>模型调用</dt><dd id="model-calls">—</dd></div>
           <div><dt>工具调用</dt><dd id="tool-calls">—</dd></div>

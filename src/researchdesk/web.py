@@ -30,20 +30,24 @@ from .verification import evidence_context, load_run
 
 ID = re.compile(r"[0-9a-f]{32}")
 STATIC = Path(__file__).with_name("static")
+LIVE_MODES = {"local", "web"}
+RECOVERY_DEMO_NOTES = "ResearchDesk saves source evidence before publishing the report."
 WORKER = "from researchdesk.web import worker; import sys; raise SystemExit(worker(*sys.argv[1:]))"
 
 
 class ResearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
-    mode: Literal["demo", "local", "web"] = "demo"
+    mode: Literal["demo", "recovery_demo", "local", "web"] = "demo"
     question: str = Field(default="", max_length=4000)
     notes: str = Field(default="", max_length=50000)
     max_model_calls: int = Field(default=6, ge=1, le=12)
 
     @model_validator(mode="after")
     def require_inputs(self):
-        if self.mode != "demo" and not self.question:
+        if self.mode in LIVE_MODES and not self.question:
             raise ValueError("A research question is required.")
+        if self.mode == "recovery_demo" and self.question:
+            raise ValueError("The offline recovery demo uses a fixed question.")
         if self.mode == "local" and not self.notes:
             raise ValueError("Local research requires source notes.")
         if self.mode != "local" and self.notes:
@@ -73,16 +77,21 @@ def worker(root, run_id, action):
     job = child_run_path(root / "jobs", run_id)
     with RunLock(job):
         request = read_json(job / "job.json")
-        args = ["--output", str(root / "research")]
+        research_root = root / "research"
+        if request["mode"] == "recovery_demo":
+            from .fault_worker import configure_workbench_demo
+
+            configure_workbench_demo(job, research_root, action)
+        args = ["--output", str(research_root)]
         if action == "resume":
             args.extend(["--resume", run_id])
         elif request["mode"] == "demo":
             args.extend(["--demo", "--", request["question"]])
         else:
             args.extend(["--max-model-calls", str(request["max_model_calls"]), "--max-tool-calls", "10",
-                         "--max-provider-requests", "0" if request["mode"] == "local" else "4",
+                         "--max-provider-requests", "4" if request["mode"] == "web" else "0",
                          "--tool-retries", "0"])
-            if request["mode"] == "local":
+            if request["mode"] in {"local", "recovery_demo"}:
                 args.extend(["--local-only", "--document", str(job / "notes.md")])
             args.extend(["--", request["question"]])
         save_json(job / "attempt.json", {"status": "running"})
@@ -144,12 +153,15 @@ class Runs:
             status = "failed"
         else:
             status = "interrupted"
+        recovery_demo = details["mode"] == "recovery_demo"
         return dict(id=job.name, mode=details["mode"], question=details["question"],
                     created_at=details["created_at"], status=status,
                     can_stop=active and job.name in self.processes,
-                    can_resume=self.allow_live and status == "interrupted" and metadata.get("mode") == "live"
+                    can_resume=(self.allow_live or recovery_demo) and status == "interrupted"
+                               and metadata.get("mode") == "live"
                                and metadata.get("prepared") is True,
                     stopped_by_workbench=attempt.get("status") == "stopped",
+                    recovery_demo_injected=recovery_demo and (job / "recovery-demo-fault.json").is_file(),
                     error_type=metadata.get("error_type"),
                     exit_code=attempt.get("exit_code"), resume_count=metadata.get("resume_count", 0),
                     model_limit=(metadata.get("model_policy") or {}).get("max_calls"))
@@ -254,7 +266,8 @@ def build_run_summary(record, directory, citation_check):
     return {
         "schema_version": 1,
         **{key: record[key] for key in ("id", "mode", "created_at", "status", "resume_count",
-                                       "model_limit", "exit_code", "error_type", "stopped_by_workbench", "can_resume")},
+                                       "model_limit", "exit_code", "error_type", "stopped_by_workbench", "can_resume",
+                                       "recovery_demo_injected")},
         "metrics": metrics,
         "citation_check": citation_check,
         "recent_activity": activity,
@@ -309,16 +322,20 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
 
     @app.post("/api/runs", status_code=202)
     def start(request: ResearchRequest):
-        if request.mode != "demo" and not runs.allow_live:
+        if request.mode in LIVE_MODES and not runs.allow_live:
             raise HTTPException(403, "Real research requires starting the server with --allow-live.")
         with runs.lock:
             runs.ensure_idle()
             job = runs.jobs / uuid4().hex
             job.mkdir()
-            if request.notes:
-                atomic_text(job / "notes.md", request.notes)
-            save_json(job / "job.json", dict(mode=request.mode, question=request.question or "证据台账示例",
-                                            max_model_calls=request.max_model_calls, created_at=now()))
+            recovery_demo = request.mode == "recovery_demo"
+            notes = RECOVERY_DEMO_NOTES if recovery_demo else request.notes
+            if notes:
+                atomic_text(job / "notes.md", notes)
+            question = "离线恢复演示" if recovery_demo else request.question or "证据台账示例"
+            save_json(job / "job.json", dict(mode=request.mode, question=question,
+                                            max_model_calls=3 if recovery_demo else request.max_model_calls,
+                                            created_at=now()))
             runs.launch(job, "start")
             return runs.overview(job)
 
