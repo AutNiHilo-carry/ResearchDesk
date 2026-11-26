@@ -108,6 +108,14 @@ if sys.argv[3] == 'start':
         assert done["id"] == run_id and done["resume_count"] == 1 and done["status"] == "completed"
         assert done["metrics"] == parked["metrics"] == dict(model_calls=2, tool_calls=1, provider_requests=0)
         assert done["report"] and done["evidence"]
+        activity = done["activity"]
+        assert 1 <= len(activity) <= 8
+        assert [event["event_id"] for event in activity] == sorted(
+            (event["event_id"] for event in activity), reverse=True,
+        )
+        assert any(event["event"] == "model_completed" for event in activity)
+        assert all(set(event) <= {"event_id", "event", "tool", "timestamp", "error_code", "will_retry"}
+                   for event in activity)
 
 
 def test_report_renderer():

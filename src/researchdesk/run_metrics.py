@@ -5,17 +5,24 @@ from collections import Counter
 
 
 def run_metrics(directory):
+    metrics, _ = run_metrics_snapshot(directory)
+    return metrics
+
+
+def run_metrics_snapshot(directory):
     path = directory / "application.sqlite3"
     if not path.exists():
-        return {"model_calls": None, "total_tokens": None, "tool_success_rate": None, "retry_count": None}
+        return {"model_calls": None, "total_tokens": None, "tool_success_rate": None, "retry_count": None}, []
     connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
     try:
-        events = [json.loads(row[0]) for row in connection.execute("SELECT payload FROM events ORDER BY id")]
+        connection.execute("BEGIN")
+        events = [(eid, json.loads(payload)) for eid, payload in
+                  connection.execute("SELECT id,payload FROM events ORDER BY id")]
         operations = list(connection.execute("SELECT id,attempts,result FROM dispatches"))
         counters = dict(connection.execute("SELECT name,value FROM counters"))
     finally:
         connection.close()
-    return metrics_from_rows(events, operations, counters)
+    return metrics_from_rows([event for _, event in events], operations, counters), events
 
 
 def metrics_from_rows(events, operations, counters):

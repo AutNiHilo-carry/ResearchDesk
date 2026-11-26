@@ -19,6 +19,7 @@ const messages = {
 let selection = location.hash.slice(1) || null;
 let latest = null;
 let renderedReport = null;
+let renderedActivity = null;
 let activeCitation = null;
 let renderedHistory = null;
 let historyRecords = null;
@@ -165,6 +166,37 @@ function renderReport(run) {
   });
 }
 
+const activityLabels = {
+  model_started: "已发起模型请求", model_completed: "模型请求完成",
+  model_failed: "模型请求失败", model_budget_denied: "模型请求受预算限制",
+  started: "工具开始", completed: "工具完成", failed: "工具失败",
+  rejected: "工具请求被拒绝", attempt_failed: "工具尝试失败",
+  cache_hit: "命中缓存", replayed: "复用已记录的工具结果",
+};
+
+function renderActivity(run) {
+  const events = run.activity ?? [];
+  const key = JSON.stringify([run.id, events]);
+  if (key === renderedActivity) return;
+  renderedActivity = key;
+  const panel = byId("run-activity");
+  panel.hidden = !events.length;
+  const list = byId("activity-events");
+  list.replaceChildren();
+  if (!events.length) return;
+  const label = (item) => [activityLabels[item.event] || "记录运行事件", item.tool]
+    .filter(Boolean).join(" · ");
+  byId("activity-summary").textContent = "最近活动 · " + label(events[0]);
+  for (const event of events) {
+    const row = document.createElement("li");
+    const time = new Date(event.timestamp);
+    const timestamp = Number.isFinite(time.getTime()) ? time.toLocaleTimeString("zh-CN", { hour12: false }) : "";
+    row.textContent = [timestamp, label(event), event.error_code, event.will_retry ? "将重试" : ""]
+      .filter(Boolean).join(" · ");
+    list.append(row);
+  }
+}
+
 function renderRun(run) {
   latest = run;
   byId("run-id").textContent = run.id;
@@ -191,6 +223,7 @@ function renderRun(run) {
       "· 匹配 " + check.matched + "/" + check.total +
       " · 未通过 " + check.mismatched + " · 缺失 " + check.missing;
   }
+  renderActivity(run);
   renderReport(run);
   byId("locate-citation-issue").hidden = !document.querySelector(issueSelector);
   byId("editor").hidden = true;

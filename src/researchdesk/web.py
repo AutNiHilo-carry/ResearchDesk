@@ -23,7 +23,8 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .citations import CITATION
 from .ledger import now
-from .run_metrics import run_metrics
+from .inspect_run import safe_event
+from .run_metrics import run_metrics_snapshot
 from .storage import RecoveryError, RunLock, atomic_text
 from .verification import evidence_context, load_run
 
@@ -284,9 +285,14 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
         record = runs.overview(job)
         directory = child_run_path(runs.research, run_id)
         try:
-            metrics = run_metrics(directory)
+            metrics, events = run_metrics_snapshot(directory)
         except sqlite3.Error:
-            metrics = {}
+            metrics, events = {}, []
+        activity = []
+        for event_id, event in reversed(events[-8:]):
+            safe = safe_event(event, event_id)
+            activity.append({key: safe[key] for key in
+                             ("event_id", "event", "tool", "timestamp", "error_code", "will_retry") if key in safe})
         report, citations = None, {}
         if record["status"] == "completed":
             report, citations = read_completed_report(directory)
@@ -300,7 +306,7 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
                 citation_check["matched"] += 1
             else:
                 citation_check["mismatched"] += 1
-        return dict(**record, report=report, evidence=citations, citation_check=citation_check,
+        return dict(**record, report=report, evidence=citations, citation_check=citation_check, activity=activity,
                     metrics={key: metrics.get(key) for key in ("model_calls", "tool_calls", "provider_requests")})
 
     @app.get("/api/runs/{run_id}/report.zip", response_class=Response)
