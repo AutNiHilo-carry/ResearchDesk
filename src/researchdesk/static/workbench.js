@@ -73,7 +73,10 @@ function syncRunActions() {
   byId("start").disabled = !connected || submitting || active || suiteBusy;
   byId("stop").disabled = !connected || submitting || suiteBusy || !latest?.can_stop;
   byId("resume").disabled = !connected || submitting || suiteBusy || !latest?.can_resume;
-  byId("start-recovery-suite").disabled = !connected || submitting || active || suiteBusy;
+  const suiteDisabled = !connected || submitting || active || suiteBusy;
+  byId("start-recovery-suite").disabled = suiteDisabled;
+  byId("resume-recovery-suite").hidden = recoverySuite?.status !== "interrupted";
+  byId("resume-recovery-suite").disabled = suiteDisabled;
   syncDownload("download-summary", "run-summary.json", Boolean(latest));
   syncDownload("download-report", "report.zip", latest?.status === "completed" && Boolean(latest.report));
 }
@@ -314,13 +317,13 @@ function renderRecoverySuite(suite) {
   if (wasRunning && suite.status !== "running" && byId("recovery-comparison").open) void refreshComparison();
 }
 
-async function startRecoverySuite() {
-  if (byId("start-recovery-suite").disabled) return;
+async function startRecoverySuite(resume = false) {
+  if (byId(resume ? "resume-recovery-suite" : "start-recovery-suite").disabled) return;
   suiteSubmitting = true;
   showError();
   syncRunActions();
   try {
-    const suite = await request("/api/recovery-suite", { method: "POST" });
+    const suite = await request(resume ? "/api/recovery-suite/resume" : "/api/recovery-suite", { method: "POST" });
     renderRecoverySuite(suite);
   } catch (error) {
     showError(error);
@@ -519,7 +522,8 @@ async function changeRun(path, data) {
   }
 }
 
-byId("start-recovery-suite").addEventListener("click", startRecoverySuite);
+byId("start-recovery-suite").addEventListener("click", () => startRecoverySuite());
+byId("resume-recovery-suite").addEventListener("click", () => startRecoverySuite(true));
 byId("refresh-comparison").addEventListener("click", refreshComparison);
 byId("recovery-comparison").addEventListener("toggle", (event) => {
   if (event.currentTarget.open) void refreshComparison();

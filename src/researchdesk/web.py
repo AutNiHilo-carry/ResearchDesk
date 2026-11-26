@@ -197,9 +197,9 @@ class Runs:
                if ID.fullmatch(other.name) and (other / "job.json").is_file()):
             raise HTTPException(409, "Wait for the current run or stop it first.")
 
-    def start_job(self, request):
-        job = self.jobs / uuid4().hex
-        job.mkdir()
+    def start_job(self, request, *, run_id=None):
+        job = child_run_path(self.jobs, run_id or uuid4().hex)
+        job.mkdir(exist_ok=run_id is not None)
         recovery_demo = request.mode == "recovery_demo"
         notes = RECOVERY_DEMO_NOTES if recovery_demo else request.notes
         if notes:
@@ -225,13 +225,20 @@ class Runs:
         with self.lock:
             save_json(self.suite_file, suite)
 
-    def start_suite(self):
+    def start_suite(self, *, resume=False):
         with self.lock:
             self.ensure_manual_run()
             self.ensure_idle()
-            suite = dict(id=uuid4().hex, status="running", created_at=now(), cases=[
-                dict(boundary=boundary, model_limit=budget, phase="pending") for boundary, budget in RECOVERY_CASES
-            ])
+            if resume:
+                suite = self.suite_state()
+                if not suite or suite["status"] != "interrupted":
+                    raise HTTPException(409, "There is no interrupted recovery suite.")
+                suite.pop("finished_at", None)
+            else:
+                suite = dict(id=uuid4().hex, created_at=now(), cases=[
+                    dict(boundary=boundary, model_limit=budget, phase="pending") for boundary, budget in RECOVERY_CASES
+                ])
+            suite["status"] = "running"
             self.save_suite(suite)
             self.suite_thread = Thread(target=self.run_suite, args=(suite,), name="offline-recovery-suite", daemon=True)
             self.suite_thread.start()
@@ -245,44 +252,63 @@ class Runs:
                 with self.lock:
                     if process.poll() is None:
                         self.stop(job)
-                return False
+                        return False
+                return not interrupted
         return not self.shutting_down.is_set()
+
+    def run_suite_case(self, suite, case):
+        boundary, budget = case["boundary"], case["model_limit"]
+        request = ResearchRequest(mode="recovery_demo", recovery_point=boundary,
+                                  recovery_budget=budget if boundary == "model_response" else None)
+        with self.lock:
+            if self.shutting_down.is_set():
+                return False
+            run_id = case.get("run_id")
+            job = child_run_path(self.jobs, run_id) if run_id else None
+            record = self.overview(job) if job and (job / "job.json").is_file() else None
+            process = None
+            case.pop("error", None)
+            if not record or (record["status"] == "interrupted" and not record["recovery_demo_injected"]):
+                # Save the assignment before launching so a restart can find this attempt.
+                run_id = (None if record else run_id) or uuid4().hex
+                case.update(run_id=run_id, phase="injecting")
+                self.save_suite(suite)
+                job = self.start_job(request, run_id=run_id)
+                process = self.processes[job.name]
+        if process is not None and not self.wait_for_suite_worker(job, process):
+            return False
+
+        with self.lock:
+            if self.shutting_down.is_set():
+                return False
+            record = self.overview(job)
+            if not record["recovery_demo_injected"]:
+                case.update(phase="failed", outcome=record["status"], error="fault_not_confirmed")
+                return True
+            process = None
+            if record["can_resume"]:
+                case["phase"] = "resuming"
+                self.save_suite(suite)
+                self.launch(job, "resume")
+                process = self.processes[job.name]
+        if process is not None and not self.wait_for_suite_worker(job, process):
+            return False
+
+        record = self.overview(job)
+        expected = "budget_exhausted" if budget == 1 else "completed"
+        succeeded = record["status"] == expected and record["resume_count"] >= 1
+        case.update(phase="finished" if succeeded else "failed", outcome=record["status"])
+        return True
 
     def run_suite(self, suite):
         try:
             for case in suite["cases"]:
-                with self.lock:
-                    if self.shutting_down.is_set():
-                        break
-                    boundary, budget = case["boundary"], case["model_limit"]
-                    request = ResearchRequest(mode="recovery_demo", recovery_point=boundary,
-                                              recovery_budget=budget if boundary == "model_response" else None)
-                    job = self.start_job(request)
-                    process = self.processes[job.name]
-                    case.update(run_id=job.name, phase="injecting")
-                    self.save_suite(suite)
-                if not self.wait_for_suite_worker(job, process):
-                    case.update(phase="failed", error="worker_stopped")
+                if case["phase"] == "finished" or (case["phase"] == "failed" and case.get("error") != "worker_stopped"):
+                    continue
+                if not self.run_suite_case(suite, case):
+                    if not self.shutting_down.is_set():
+                        case.update(phase="failed", error="worker_stopped")
                     break
-                with self.lock:
-                    record = self.overview(job)
-                    if not record["can_resume"] or not record["recovery_demo_injected"]:
-                        case.update(phase="failed", outcome=record["status"], error="fault_not_confirmed")
-                        self.save_suite(suite)
-                        continue
-                    if self.shutting_down.is_set():
-                        break
-                    self.launch(job, "resume")
-                    process = self.processes[job.name]
-                    case["phase"] = "resuming"
-                    self.save_suite(suite)
-                if not self.wait_for_suite_worker(job, process):
-                    case.update(phase="failed", error="worker_stopped")
-                    break
-                record = self.overview(job)
-                expected = "budget_exhausted" if budget == 1 else "completed"
-                case.update(phase="finished" if record["status"] == expected and record["resume_count"] == 1 else "failed",
-                            outcome=record["status"])
                 self.save_suite(suite)
             if self.shutting_down.is_set():
                 suite["status"] = "interrupted"
@@ -470,6 +496,10 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
     @app.post("/api/recovery-suite", status_code=202)
     def start_recovery_suite():
         return runs.start_suite()
+
+    @app.post("/api/recovery-suite/resume", status_code=202)
+    def resume_recovery_suite():
+        return runs.start_suite(resume=True)
 
     @app.get("/api/recovery-comparison")
     def recovery_comparison():

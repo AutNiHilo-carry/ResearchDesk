@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 import shutil
 import subprocess
+from threading import Event
 from zipfile import ZipFile
 
 import pytest
@@ -265,29 +266,58 @@ def test_model_response_demo_keeps_original_budget(tmp_path, budget, outcome, mo
             assert any(event["event"] == "model_budget_denied" for event in done["activity"])
 
 
-def test_offline_recovery_suite_runs_all_cases_without_browser_or_live_mode(tmp_path):
+def test_offline_recovery_suite_continues_after_server_restart(tmp_path, monkeypatch):
     base_url = "http://127.0.0.1"
-    with TestClient(web.create_app(tmp_path), base_url=base_url) as client:
-        response = client.post("/api/recovery-suite")
-        assert response.status_code == 202
-        started = response.json()
-        assert started["status"] == "running"
-        assert client.post("/api/recovery-suite").status_code == 409
-        assert client.post("/api/runs", json={"mode": "demo"}).status_code == 409
+    reached_receipt = Event()
+    wait = web.Runs.wait_for_suite_worker
+
+    def pause_after_receipt(runs, job, process):
+        finished = wait(runs, job, process)
+        marker = job / "recovery-demo-fault.json"
+        if finished and marker.is_file() and web.read_json(marker)["point"] == "receipt":
+            reached_receipt.set()
+            return not runs.shutting_down.wait(50)
+        return finished
+
+    with monkeypatch.context() as patch:
+        patch.setattr(web.Runs, "wait_for_suite_worker", pause_after_receipt)
+        with TestClient(web.create_app(tmp_path), base_url=base_url) as client:
+            assert client.post("/api/recovery-suite/resume").status_code == 409
+            response = client.post("/api/recovery-suite")
+            assert response.status_code == 202
+            started = response.json()
+            assert started["status"] == "running"
+            assert client.post("/api/recovery-suite").status_code == 409
+            assert client.post("/api/runs", json={"mode": "demo"}).status_code == 409
+            assert reached_receipt.wait(90)
+            before = client.get("/api/runs").json()["recovery_suite"]
+            finished, interrupted, *_ = before["cases"]
+            assert finished["phase"] == "finished" and interrupted["phase"] == "injecting"
+            assert client.get(f"/api/runs/{interrupted['run_id']}").json()["recovery_demo_injected"]
+
+    with TestClient(web.create_app(tmp_path), base_url=base_url) as restarted:
+        assert restarted.get("/api/runs").json()["recovery_suite"]["status"] == "interrupted"
+        resumed = restarted.post("/api/recovery-suite/resume")
+        assert resumed.status_code == 202 and resumed.json()["id"] == started["id"]
         deadline = time.monotonic() + 140
         while time.monotonic() < deadline:
-            suite = client.get("/api/runs").json()["recovery_suite"]
+            overview = restarted.get("/api/runs").json()
+            suite = overview["recovery_suite"]
             if suite["status"] != "running":
                 break
             time.sleep(0.1)
         assert suite["id"] == started["id"] and suite["status"] == "completed", suite
+        assert suite["cases"][0] == finished
+        assert suite["cases"][1]["run_id"] == interrupted["run_id"]
+        assert len(overview["runs"]) == 5
         assert [item["phase"] for item in suite["cases"]] == ["finished"] * 5
         assert [item["outcome"] for item in suite["cases"]] == ["completed"] * 4 + ["budget_exhausted"]
         for item in suite["cases"]:
-            row = comparison_result(client, item["boundary"], item["model_limit"])
+            row = comparison_result(restarted, item["boundary"], item["model_limit"])
             assert row["id"] == item["run_id"] and row["status"] == item["outcome"]
-            record = client.get(f"/api/runs/{row['id']}").json()
+            record = restarted.get(f"/api/runs/{row['id']}").json()
             assert record["metrics"]["provider_requests"] == 0 and record["resume_count"] == 1
+        assert restarted.post("/api/recovery-suite/resume").status_code == 409
 
     with TestClient(web.create_app(tmp_path), base_url=base_url) as restarted:
         assert restarted.get("/api/runs").json()["recovery_suite"] == suite
