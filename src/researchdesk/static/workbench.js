@@ -17,6 +17,7 @@ let latest = null;
 let renderedReport = null;
 let activeCitation = null;
 let renderedHistory = null;
+let historyRecords = null;
 let refreshing = false;
 let submitting = false;
 let active = false;
@@ -47,8 +48,12 @@ function setMode() {
   byId("start").disabled = submitting || active;
 }
 
-function renderHistory(records) {
-  const key = JSON.stringify([selection, records]);
+function renderHistory() {
+  if (!historyRecords) return;
+  const query = byId("history-search").value.trim().toLowerCase();
+  const records = historyRecords.filter((run) =>
+    run.question.toLowerCase().includes(query) || run.id.includes(query));
+  const key = JSON.stringify([selection, Boolean(query), records]);
   if (key === renderedHistory) return;
   renderedHistory = key;
   const nav = byId("history");
@@ -56,7 +61,7 @@ function renderHistory(records) {
   if (!records.length) {
     const empty = document.createElement("p");
     empty.className = "muted";
-    empty.textContent = "暂无运行记录";
+    empty.textContent = query ? "没有匹配的运行记录" : "暂无运行记录";
     nav.append(empty);
   }
   for (const run of records) {
@@ -188,7 +193,8 @@ async function refresh() {
     }
     active = snapshot.runs.some((run) => run.status === "running");
     setMode();
-    renderHistory(snapshot.runs);
+    historyRecords = snapshot.runs;
+    renderHistory();
     const selected = selection;
     if (selected) {
       const run = await request(`/api/runs/${encodeURIComponent(selected)}`);
@@ -236,6 +242,7 @@ async function changeRun(path, data) {
 
 byId("locate-citation-issue").addEventListener("click", () => document.querySelector(issueSelector)?.focus());
 byId("back-to-citation").addEventListener("click", () => activeCitation?.focus());
+byId("history-search").addEventListener("input", renderHistory);
 byId("compose").addEventListener("click", () => showRun(null));
 byId("mode").addEventListener("change", setMode);
 byId("research-form").addEventListener("submit", (event) => {
