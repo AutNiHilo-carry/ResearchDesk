@@ -9,6 +9,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+from textwrap import indent
 from threading import RLock
 from typing import Literal
 from uuid import uuid4
@@ -20,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from .citations import CITATION
 from .ledger import now
 from .run_metrics import run_metrics
 from .storage import RecoveryError, RunLock, atomic_text
@@ -197,6 +199,21 @@ def read_completed_report(directory):
     return report, citations
 
 
+def report_with_evidence(report, citations):
+    blocks = []
+    for evidence_id in dict.fromkeys(CITATION.findall(report)):
+        evidence = citations.get(evidence_id)
+        if evidence is None:
+            continue
+        source = "\n".join(filter(None, (evidence["title"], evidence["location"])))
+        excerpt = "\n\n".join(filter(None, (source, evidence["snippet"])))
+        # Preserve source text literally even if it contains Markdown or HTML.
+        blocks.append(f"### {evidence_id}\n\n{indent(excerpt, '    ')}")
+    if not blocks:
+        return report
+    return report + "\n\n## \u5f15\u7528\u8bc1\u636e\n\n" + "\n\n".join(blocks) + "\n"
+
+
 def create_app(output=Path("runs/web"), *, allow_live=False):
     runs = Runs(Path(output), allow_live)
 
@@ -281,7 +298,7 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
         report, citations = read_completed_report(child_run_path(runs.research, run_id))
         archive = BytesIO()
         with ZipFile(archive, "w", compression=ZIP_DEFLATED) as bundle:
-            bundle.writestr("report.md", report)
+            bundle.writestr("report.md", report_with_evidence(report, citations))
             bundle.writestr("evidence.json", json.dumps(citations, ensure_ascii=False, indent=2) + "\n")
         return Response(archive.getvalue(), media_type="application/zip", headers={
             "Content-Disposition": f'attachment; filename="researchdesk-{run_id}.zip"',

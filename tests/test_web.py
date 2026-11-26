@@ -52,7 +52,13 @@ def test_offline_demo_serves_assets_and_resolves_report_citations(tmp_path):
         assert download.headers["cache-control"] == "no-store"
         with ZipFile(BytesIO(download.content)) as bundle:
             assert bundle.namelist() == ["report.md", "evidence.json"]
-            assert bundle.read("report.md").decode() == done["report"]
+            exported = bundle.read("report.md").decode()
+            assert exported.startswith(done["report"] + "\n\n")
+            assert exported.count(f"### {eid}\n") == 1
+            assert any(
+                line.startswith("    ") and "exact evidence quotes" in line
+                for line in exported.splitlines()
+            )
             assert json.loads(bundle.read("evidence.json")) == done["evidence"]
         assert done["metrics"]["provider_requests"] == 0
         assert client.post(f"/api/runs/{run_id}/resume").status_code == 409

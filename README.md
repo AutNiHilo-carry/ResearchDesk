@@ -47,7 +47,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m researchdesk.web
 ```
 
-打开 [本地工作台](http://127.0.0.1:8765)，选择「运行离线示例」，然后点击报告中的引用查看出处。FastAPI 同时提供 [API 文档](http://127.0.0.1:8765/docs)。运行记录独立保存在 `runs/web`。报告完成后，点击「下载报告与证据」，可获得含 `report.md` 和 `evidence.json` 的 ZIP。
+打开 [本地工作台](http://127.0.0.1:8765)，选择「运行离线示例」，然后点击报告中的引用查看出处。FastAPI 同时提供 [API 文档](http://127.0.0.1:8765/docs)。运行记录独立保存在 `runs/web`。报告完成后，点击「下载报告与证据」，可获得含 `report.md` 和 `evidence.json` 的 ZIP。Markdown 文末按正文首次引用的顺序附上来源和原文摘录。
 
 需要真实研究时，配置本地模型凭证并用 `python -m researchdesk.web --allow-live` 启动。可以粘贴资料启动本地研究，也可以在配置搜索凭证后选择网页研究。网页可中断当前进程；运行已准备完成时，恢复会沿用原 ID、资料与预算。服务绑定本机回环地址。
 
