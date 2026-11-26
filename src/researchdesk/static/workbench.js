@@ -10,6 +10,7 @@ const historyDate = new Intl.DateTimeFormat("zh-CN", {
   hour: "2-digit", minute: "2-digit", hourCycle: "h23",
 });
 const percent = new Intl.NumberFormat("zh-CN", { style: "percent", maximumFractionDigits: 1 });
+const recoveryBoundaries = { report: "报告写入后", receipt: "工具结果写入后" };
 const modes = { recovery_demo: "离线恢复演示", demo: "离线示例", local: "本地资料", web: "网页研究" };
 const messages = {
   403: "真实研究未启用，请使用离线示例或重新启动服务。",
@@ -83,6 +84,7 @@ function syncDownload(elementId, filename, available) {
 function setMode() {
   const mode = byId("mode").value;
   const live = mode === "local" || mode === "web";
+  byId("recovery-point-fields").hidden = mode !== "recovery_demo";
   byId("question-fields").hidden = !live;
   byId("question").required = live;
   byId("source-fields").hidden = mode !== "local";
@@ -248,7 +250,8 @@ function renderOutcome(run) {
   let reason;
   if (run.status === "interrupted") {
     reason = run.stopped_by_workbench ? "工作台已中断运行。"
-      : run.recovery_demo_injected && !run.resume_count ? "演示已在报告写入后终止进程。"
+      : run.recovery_demo_injected && !run.resume_count
+        ? "演示已在" + (recoveryBoundaries[run.recovery_demo_boundary] || recoveryBoundaries.report) + "终止进程。"
       : "运行已中断。";
     reason += run.can_resume ? "可从已保存的状态继续。" : "当前无可用的网页恢复入口。";
   } else if (run.status === "budget_exhausted") {
@@ -302,9 +305,16 @@ function renderRun(run) {
   const demo = byId("recovery-demo-state");
   demo.hidden = run.mode !== "recovery_demo";
   if (!demo.hidden) {
-    demo.textContent = run.resume_count && run.status === "completed"
-      ? "离线演示完成，已用原运行 ID 恢复并发布报告。"
-      : "离线恢复演示使用固定资料和脚本模型。";
+    const boundary = recoveryBoundaries[run.recovery_demo_boundary] || recoveryBoundaries.report;
+    demo.textContent = "离线恢复演示 · " + boundary + "中断";
+    if (run.resume_count && run.status === "completed") {
+      demo.textContent += "。已用原运行 ID 恢复并发布报告。";
+      const before = run.recovery_demo_before;
+      if (before && Number.isInteger(run.metrics.tool_calls) && Number.isInteger(run.metrics.recovery_replays)) {
+        demo.textContent += "工具调用 " + before.tool_calls + " → " + run.metrics.tool_calls +
+          "，已记录结果复用 " + before.recovery_replays + " → " + run.metrics.recovery_replays + "。";
+      }
+    }
   }
   renderOutcome(run);
   renderActivity(run);
@@ -425,7 +435,9 @@ byId("mode").addEventListener("change", setMode);
 byId("research-form").addEventListener("submit", (event) => {
   event.preventDefault();
   const mode = byId("mode").value;
-  const data = mode === "demo" || mode === "recovery_demo" ? { mode } : {
+  const data = mode === "demo" ? { mode }
+    : mode === "recovery_demo" ? { mode, recovery_point: byId("recovery-point").value }
+    : {
     mode, question: byId("question").value, notes: mode === "local" ? byId("notes").value : "",
     max_model_calls: Number(byId("budget").value),
   };

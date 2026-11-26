@@ -40,6 +40,7 @@ class ResearchRequest(BaseModel):
     mode: Literal["demo", "recovery_demo", "local", "web"] = "demo"
     question: str = Field(default="", max_length=4000)
     notes: str = Field(default="", max_length=50000)
+    recovery_point: Literal["report", "receipt"] | None = None
     max_model_calls: int = Field(default=6, ge=1, le=12)
 
     @model_validator(mode="after")
@@ -48,6 +49,8 @@ class ResearchRequest(BaseModel):
             raise ValueError("A research question is required.")
         if self.mode == "recovery_demo" and self.question:
             raise ValueError("The offline recovery demo uses a fixed question.")
+        if self.recovery_point is not None and self.mode != "recovery_demo":
+            raise ValueError("Recovery points are only available for the offline recovery demo.")
         if self.mode == "local" and not self.notes:
             raise ValueError("Local research requires source notes.")
         if self.mode != "local" and self.notes:
@@ -81,7 +84,7 @@ def worker(root, run_id, action):
         if request["mode"] == "recovery_demo":
             from .fault_worker import configure_workbench_demo
 
-            configure_workbench_demo(job, research_root, action)
+            configure_workbench_demo(job, research_root, action, request.get("recovery_point") or "report")
         args = ["--output", str(research_root)]
         if action == "resume":
             args.extend(["--resume", run_id])
@@ -161,6 +164,7 @@ class Runs:
                                and metadata.get("mode") == "live"
                                and metadata.get("prepared") is True,
                     stopped_by_workbench=attempt.get("status") == "stopped",
+                    recovery_demo_boundary=(details.get("recovery_point") or "report") if recovery_demo else None,
                     recovery_demo_injected=recovery_demo and (job / "recovery-demo-fault.json").is_file(),
                     error_type=metadata.get("error_type"),
                     exit_code=attempt.get("exit_code"), resume_count=metadata.get("resume_count", 0),
@@ -261,13 +265,31 @@ def summarize_citations(report, citations):
     return citation_check
 
 
-def build_run_summary(record, directory, citation_check):
+def recovery_demo_before(record, job):
+    if not record["recovery_demo_injected"]:
+        return None
+    try:
+        marker = read_json(job / "recovery-demo-fault.json")
+    except (OSError, ValueError):
+        return None
+    if (not isinstance(marker, dict) or marker.get("run_id") != record["id"]
+            or marker.get("point") != record["recovery_demo_boundary"]):
+        return None
+    before = marker.get("before")
+    keys = ("model_calls", "tool_calls", "recovery_replays")
+    if not isinstance(before, dict) or any(type(before.get(key)) is not int or before[key] < 0 for key in keys):
+        return None
+    return {key: before[key] for key in keys}
+
+
+def build_run_summary(record, directory, citation_check, job):
     metrics, activity = read_run_observability(directory)
     return {
         "schema_version": 1,
         **{key: record[key] for key in ("id", "mode", "created_at", "status", "resume_count",
                                        "model_limit", "exit_code", "error_type", "stopped_by_workbench", "can_resume",
-                                       "recovery_demo_injected")},
+                                       "recovery_demo_injected", "recovery_demo_boundary")},
+        "recovery_demo_before": recovery_demo_before(record, job),
         "metrics": metrics,
         "citation_check": citation_check,
         "recent_activity": activity,
@@ -334,6 +356,7 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
                 atomic_text(job / "notes.md", notes)
             question = "离线恢复演示" if recovery_demo else request.question or "证据台账示例"
             save_json(job / "job.json", dict(mode=request.mode, question=question,
+                                            recovery_point=(request.recovery_point or "report") if recovery_demo else None,
                                             max_model_calls=3 if recovery_demo else request.max_model_calls,
                                             created_at=now()))
             runs.launch(job, "start")
@@ -349,11 +372,12 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
         if record["status"] == "completed":
             report, citations = read_completed_report(directory)
         return dict(**record, report=report, evidence=citations, citation_check=summarize_citations(report, citations),
-                    activity=activity, metrics=metrics)
+                    activity=activity, metrics=metrics, recovery_demo_before=recovery_demo_before(record, job))
 
     @app.get("/api/runs/{run_id}/run-summary.json")
     def export_run_summary(run_id: str):
-        record = runs.overview(runs.job(run_id))
+        job = runs.job(run_id)
+        record = runs.overview(job)
         directory = child_run_path(runs.research, run_id)
         citation_check = None
         if record["status"] == "completed":
@@ -364,7 +388,7 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
                     raise
             else:
                 citation_check = summarize_citations(report, citations)
-        return JSONResponse(build_run_summary(record, directory, citation_check), headers={
+        return JSONResponse(build_run_summary(record, directory, citation_check, job), headers={
             "Content-Disposition": f'attachment; filename="researchdesk-{run_id}-summary.json"',
             "Cache-Control": "no-store",
         })
@@ -377,7 +401,7 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
             raise HTTPException(409, "The report is available after the run completes.")
         directory = child_run_path(runs.research, run_id)
         report, citations = read_completed_report(directory)
-        summary = build_run_summary(record, directory, summarize_citations(report, citations))
+        summary = build_run_summary(record, directory, summarize_citations(report, citations), job)
         archive = BytesIO()
         with ZipFile(archive, "w", compression=ZIP_DEFLATED) as bundle:
             bundle.writestr("report.md", report_with_evidence(report, citations))

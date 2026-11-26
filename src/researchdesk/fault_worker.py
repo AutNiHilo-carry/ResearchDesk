@@ -16,7 +16,13 @@ def install_fault(point, marker, root, *, exit_code=None):
         directory = directory.resolve()
         if directory.parent != root.resolve() or not re.fullmatch("[0-9a-f]{32}", directory.name):
             raise ValueError("Fault boundary is outside this worker's run root.")
-        atomic_text(marker, json.dumps(dict(point=point, run_id=directory.name, pid=os.getpid(), reached_at=now())))
+        receipt = dict(point=point, run_id=directory.name, pid=os.getpid(), reached_at=now())
+        if exit_code is not None:
+            from .run_metrics import run_metrics
+
+            metrics = run_metrics(directory)
+            receipt["before"] = {key: metrics[key] for key in ("model_calls", "tool_calls", "recovery_replays")}
+        atomic_text(marker, json.dumps(receipt))
         if exit_code is not None:
             os._exit(exit_code)
         while True:
@@ -85,7 +91,7 @@ def scripted_model():
     os.environ["DEEPSEEK_MODEL"] = "scripted-recovery-fixture"
 
 
-def configure_workbench_demo(job, research_root, action):
+def configure_workbench_demo(job, research_root, action, point):
     """Configure only the dedicated offline recovery-demo subprocess."""
     from . import cli
 
@@ -97,7 +103,7 @@ def configure_workbench_demo(job, research_root, action):
     cli.load_dotenv = lambda: None
     scripted_model()
     if action == "start":
-        install_fault("report", job / "recovery-demo-fault.json", research_root, exit_code=75)
+        install_fault(point, job / "recovery-demo-fault.json", research_root, exit_code=75)
 
 
 def main():

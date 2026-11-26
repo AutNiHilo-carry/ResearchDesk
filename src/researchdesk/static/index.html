@@ -39,6 +39,13 @@
             <option value="local" disabled>基于本地资料</option>
             <option value="web" disabled>使用网页搜索</option>
           </select>
+          <div id="recovery-point-fields" hidden>
+            <label for="recovery-point">中断位置</label>
+            <select id="recovery-point">
+              <option value="report">报告写入后</option>
+              <option value="receipt">工具结果写入后</option>
+            </select>
+          </div>
           <p id="mode-help" class="help">使用固定资料演示报告与证据，无外部 API 请求。</p>
           <div id="question-fields" hidden>
             <label for="question">研究问题</label>

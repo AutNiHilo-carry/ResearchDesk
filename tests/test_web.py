@@ -64,7 +64,8 @@ def test_offline_demo_serves_assets_and_resolves_report_citations(tmp_path, monk
             assert summary == {
                 "schema_version": 1,
                 **{key: done[key] for key in ("id", "mode", "created_at", "status", "resume_count", "model_limit", "exit_code", "error_type", "stopped_by_workbench", "can_resume",
-                                             "recovery_demo_injected")},
+                                             "recovery_demo_injected", "recovery_demo_boundary")},
+                "recovery_demo_before": None,
                 "metrics": done["metrics"],
                 "citation_check": done["citation_check"],
                 "recent_activity": done["activity"],
@@ -150,30 +151,47 @@ if sys.argv[3] == 'start':
                    for event in activity)
 
 
-def test_offline_recovery_demo_resumes_after_web_server_restart(tmp_path):
+@pytest.mark.parametrize(
+    ("payload", "boundary", "model_calls_before", "replays_after"),
+    [({}, "report", 2, 0), ({"recovery_point": "receipt"}, "receipt", 1, 1)],
+)
+def test_offline_recovery_demo_resumes_after_web_server_restart(tmp_path, payload, boundary,
+                                                               model_calls_before, replays_after):
     base_url = "http://127.0.0.1"
     with TestClient(web.create_app(tmp_path), base_url=base_url) as client:
         assert client.post("/api/runs", json={"mode": "recovery_demo", "question": "Custom"}).status_code == 422
-        started = client.post("/api/runs", json={"mode": "recovery_demo"})
+        assert client.post("/api/runs", json={"mode": "demo", "recovery_point": "receipt"}).status_code == 422
+        assert client.post("/api/runs", json={"mode": "recovery_demo", "recovery_point": "invalid"}).status_code == 422
+        started = client.post("/api/runs", json={"mode": "recovery_demo", **payload})
         assert started.status_code == 202
         run_id = started.json()["id"]
         stopped = wait_for(client, run_id, lambda run: run["status"] == "interrupted")
         assert stopped["status"] == "interrupted" and stopped["can_resume"]
         assert stopped["recovery_demo_injected"] and not stopped["stopped_by_workbench"]
         assert stopped["report"] is None
-        assert stopped["metrics"]["model_calls"] == 2
+        assert stopped["metrics"]["model_calls"] == model_calls_before
+        assert stopped["recovery_demo_boundary"] == boundary
+        before = dict(model_calls=model_calls_before, tool_calls=1, recovery_replays=0)
+        assert stopped["recovery_demo_before"] == before
         assert stopped["metrics"]["tool_calls"] == 1
         assert stopped["metrics"]["provider_requests"] == 0
         assert client.get(f"/api/runs/{run_id}/report.zip").status_code == 409
         marker = json.loads((tmp_path / "jobs" / run_id / "recovery-demo-fault.json").read_text(encoding="utf-8"))
-        assert marker["run_id"] == run_id and marker["point"] == "report"
+        assert marker["run_id"] == run_id and marker["point"] == boundary
+        assert marker["before"] == before
 
     with TestClient(web.create_app(tmp_path), base_url=base_url) as restarted:
         assert restarted.get("/api/runs").json()["allow_live"] is False
         assert restarted.post(f"/api/runs/{run_id}/resume").status_code == 202
         done = wait_for(restarted, run_id, lambda run: run["status"] == "completed")
         assert done["status"] == "completed" and done["id"] == run_id
-        assert done["resume_count"] == 1 and done["metrics"] == stopped["metrics"]
+        assert done["resume_count"] == 1
+        assert done["metrics"] == {
+            **stopped["metrics"], "model_calls": 2, "recovery_replays": replays_after,
+        }
+        summary = restarted.get(f"/api/runs/{run_id}/run-summary.json").json()
+        assert summary["recovery_demo_before"] == before
+        assert summary["recovery_demo_boundary"] == boundary
         assert done["recovery_demo_injected"]
         assert done["citation_check"] == dict(total=1, matched=1, mismatched=0, missing=0)
         assert restarted.get(f"/api/runs/{run_id}/report.zip").status_code == 200
