@@ -272,6 +272,7 @@ async function refresh({ queueIfBusy = false } = {}) {
   refreshing = true;
   let selected = null;
   let version = navigationVersion;
+  const reconnecting = !connected;
   try {
     const snapshot = await request("/api/runs");
     connected = true;
@@ -285,7 +286,12 @@ async function refresh({ queueIfBusy = false } = {}) {
     renderHistory();
     selected = selection;
     version = navigationVersion;
-    if (selected) {
+    const selectedRecord = historyRecords.find((run) => run.id === selected);
+    // A completed report stays readable from the last response until the user
+    // reopens it, the connection returns, or its status changes.
+    const reuseReport = !reconnecting && latest?.id === selected &&
+      latest.status === "completed" && selectedRecord?.status === "completed";
+    if (selected && !reuseReport) {
       const run = await request(`/api/runs/${encodeURIComponent(selected)}`);
       if (version !== navigationVersion) return;
       renderRun(run);
@@ -318,6 +324,7 @@ function showPendingRun() {
 
 function showRun(id, updateHistory = true) {
   if (id === selection) {
+    latest = null;
     void refresh({ queueIfBusy: true });
     return;
   }

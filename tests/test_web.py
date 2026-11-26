@@ -11,7 +11,7 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
-from researchdesk import web
+from researchdesk import storage, web
 
 
 def wait_for(client, run_id, ready, timeout=45):
@@ -116,6 +116,28 @@ if sys.argv[3] == 'start':
         assert any(event["event"] == "model_completed" for event in activity)
         assert all(set(event) <= {"event_id", "event", "tool", "timestamp", "error_code", "will_retry"}
                    for event in activity)
+
+
+def test_atomic_state_update_retries_windows_reader_conflict(tmp_path, monkeypatch):
+    path = tmp_path / "run.json"
+    path.write_text('{"status":"running"}', encoding="utf-8")
+    replace = storage.os.replace
+    calls = []
+
+    def temporarily_locked(source, destination):
+        calls.append(destination)
+        if len(calls) == 1:
+            assert destination.read_text(encoding="utf-8") == '{"status":"running"}'
+            error = PermissionError("File held open by reader")
+            error.winerror = 5
+            raise error
+        replace(source, destination)
+
+    monkeypatch.setattr(storage.os, "replace", temporarily_locked)
+    storage.atomic_text(path, '{"status":"completed"}')
+    assert calls == [path, path]
+    assert path.read_text(encoding="utf-8") == '{"status":"completed"}'
+    assert list(tmp_path.iterdir()) == [path]
 
 
 def test_report_renderer():

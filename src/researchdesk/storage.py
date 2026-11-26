@@ -3,6 +3,7 @@ import json
 import os
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from uuid import uuid4
 
@@ -17,7 +18,15 @@ def atomic_text(path, text):
         handle.write(text)
         handle.flush()
         os.fsync(handle.fileno())
-    os.replace(temp, path)
+    # Windows readers can briefly prevent replacing an open destination.
+    for delay in (0.01, 0.02, 0.04, 0.08, 0):
+        try:
+            os.replace(temp, path)
+            break
+        except PermissionError as error:
+            if not delay or getattr(error, "winerror", None) not in {5, 32, 33}:
+                raise
+            time.sleep(delay)
 
 
 class RecoveryStore:
