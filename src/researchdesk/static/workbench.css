@@ -75,6 +75,9 @@ input[type="number"] { width: 8rem; }
 .status { flex: none; border-radius: 20px; padding: .35rem .7rem; background: #e1eee7; color: #235541; font-size: .875rem; font-weight: 650; }
 .status[data-state="interrupted"], .status[data-state="failed"], .status[data-state="budget_exhausted"] { background: #fff0df; color: #764916; }
 .actions { display: flex; flex-wrap: wrap; gap: .8rem; align-items: center; margin: .8rem 0 1rem; }
+.run-outcome { padding: .75rem 1rem; border: 1px solid #ddc093; border-radius: 8px; background: #fff6e8; }
+#outcome-reason { margin: 0; line-height: 1.6; color: #704315; }
+#outcome-details { overflow-wrap: anywhere; }
 .metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .7rem; margin: 1rem 0; }
 .metrics div { background: var(--wash); border: 1px solid var(--line); border-radius: 10px; padding: .8rem; }
 .metrics dt { color: var(--muted); font-size: .875rem; }

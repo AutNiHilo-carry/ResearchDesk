@@ -185,9 +185,6 @@ function renderReport(run) {
     const placeholder = document.createElement("p");
     placeholder.className = "muted";
     placeholder.textContent = run.status === "running" ? "研究进行中，报告完成后会自动显示。"
-      : run.exit_code === 2 ? "缺少模型或搜索服务配置。"
-      : run.status === "interrupted" && run.can_resume ? "运行已中断，可以从已有状态恢复。"
-      : run.status === "budget_exhausted" ? "模型调用额度已用完，当前没有完成的报告。"
       : "当前没有完成的报告。";
     report.append(placeholder);
     return;
@@ -239,6 +236,34 @@ function renderActivity(run) {
   }
 }
 
+function renderOutcome(run) {
+  const panel = byId("run-outcome");
+  panel.hidden = !["failed", "interrupted", "budget_exhausted"].includes(run.status);
+  if (panel.hidden) return;
+  let reason;
+  if (run.status === "interrupted") {
+    reason = run.stopped_by_workbench ? "工作台已中断运行。" : "运行已中断。";
+    reason += run.can_resume ? "可从已保存的状态继续。" : "当前无可用的网页恢复入口。";
+  } else if (run.status === "budget_exhausted") {
+    reason = "已达到模型调用上限。";
+  } else if (run.exit_code === 2) {
+    reason = "启动时未通过配置或参数检查。";
+  } else if (run.error_type === "CitationValidationError") {
+    reason = "报告未通过引用校验。";
+  } else if (run.error_type === "RecoveryError") {
+    reason = "已保存的运行状态未通过检查。";
+  } else {
+    reason = "研究运行失败。";
+  }
+  byId("outcome-reason").textContent = reason;
+  const details = byId("outcome-details");
+  const fields = [];
+  if (Number.isInteger(run.exit_code)) fields.push("退出码 " + run.exit_code);
+  if (/^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(run.error_type ?? "")) fields.push(run.error_type);
+  details.hidden = !fields.length;
+  details.textContent = fields.join(" · ");
+}
+
 function renderRun(run) {
   latest = run;
   byId("run-id").textContent = run.id;
@@ -267,6 +292,7 @@ function renderRun(run) {
       "· 匹配 " + check.matched + "/" + check.total +
       " · 未通过 " + check.mismatched + " · 缺失 " + check.missing;
   }
+  renderOutcome(run);
   renderActivity(run);
   renderReport(run);
   byId("locate-citation-issue").hidden = !document.querySelector(issueSelector);

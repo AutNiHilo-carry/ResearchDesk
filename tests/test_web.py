@@ -63,7 +63,7 @@ def test_offline_demo_serves_assets_and_resolves_report_citations(tmp_path, monk
             summary = json.loads(bundle.read("run-summary.json"))
             assert summary == {
                 "schema_version": 1,
-                **{key: done[key] for key in ("id", "mode", "created_at", "status", "resume_count", "model_limit", "exit_code", "error_type")},
+                **{key: done[key] for key in ("id", "mode", "created_at", "status", "resume_count", "model_limit", "exit_code", "error_type", "stopped_by_workbench", "can_resume")},
                 "metrics": done["metrics"],
                 "citation_check": done["citation_check"],
                 "recent_activity": done["activity"],
@@ -122,6 +122,9 @@ if sys.argv[3] == 'start':
         stopped_summary = client.get(f"/api/runs/{run_id}/run-summary.json").json()
         assert stopped_summary["status"] == "interrupted" and stopped_summary["citation_check"] is None
         assert stopped_summary["exit_code"] == stopped["exit_code"]
+        assert stopped["stopped_by_workbench"] is stopped_summary["stopped_by_workbench"] is True
+        assert stopped_summary["can_resume"] is True
+        assert running_summary["stopped_by_workbench"] is False
         assert stopped_summary["metrics"] == running_summary["metrics"]
         assert stopped_summary["recent_activity"] == running_summary["recent_activity"]
         assert client.post(f"/api/runs/{run_id}/resume").status_code == 202

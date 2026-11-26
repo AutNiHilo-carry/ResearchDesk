@@ -149,6 +149,7 @@ class Runs:
                     can_stop=active and job.name in self.processes,
                     can_resume=self.allow_live and status == "interrupted" and metadata.get("mode") == "live"
                                and metadata.get("prepared") is True,
+                    stopped_by_workbench=attempt.get("status") == "stopped",
                     error_type=metadata.get("error_type"),
                     exit_code=attempt.get("exit_code"), resume_count=metadata.get("resume_count", 0),
                     model_limit=(metadata.get("model_policy") or {}).get("max_calls"))
@@ -253,7 +254,7 @@ def build_run_summary(record, directory, citation_check):
     return {
         "schema_version": 1,
         **{key: record[key] for key in ("id", "mode", "created_at", "status", "resume_count",
-                                       "model_limit", "exit_code", "error_type")},
+                                       "model_limit", "exit_code", "error_type", "stopped_by_workbench", "can_resume")},
         "metrics": metrics,
         "citation_check": citation_check,
         "recent_activity": activity,
