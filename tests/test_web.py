@@ -265,6 +265,34 @@ def test_model_response_demo_keeps_original_budget(tmp_path, budget, outcome, mo
             assert any(event["event"] == "model_budget_denied" for event in done["activity"])
 
 
+def test_offline_recovery_suite_runs_all_cases_without_browser_or_live_mode(tmp_path):
+    base_url = "http://127.0.0.1"
+    with TestClient(web.create_app(tmp_path), base_url=base_url) as client:
+        response = client.post("/api/recovery-suite")
+        assert response.status_code == 202
+        started = response.json()
+        assert started["status"] == "running"
+        assert client.post("/api/recovery-suite").status_code == 409
+        assert client.post("/api/runs", json={"mode": "demo"}).status_code == 409
+        deadline = time.monotonic() + 140
+        while time.monotonic() < deadline:
+            suite = client.get("/api/runs").json()["recovery_suite"]
+            if suite["status"] != "running":
+                break
+            time.sleep(0.1)
+        assert suite["id"] == started["id"] and suite["status"] == "completed", suite
+        assert [item["phase"] for item in suite["cases"]] == ["finished"] * 5
+        assert [item["outcome"] for item in suite["cases"]] == ["completed"] * 4 + ["budget_exhausted"]
+        for item in suite["cases"]:
+            row = comparison_result(client, item["boundary"], item["model_limit"])
+            assert row["id"] == item["run_id"] and row["status"] == item["outcome"]
+            record = client.get(f"/api/runs/{row['id']}").json()
+            assert record["metrics"]["provider_requests"] == 0 and record["resume_count"] == 1
+
+    with TestClient(web.create_app(tmp_path), base_url=base_url) as restarted:
+        assert restarted.get("/api/runs").json()["recovery_suite"] == suite
+
+
 def test_atomic_state_update_retries_windows_reader_conflict(tmp_path, monkeypatch):
     path = tmp_path / "run.json"
     path.write_text('{"status":"running"}', encoding="utf-8")

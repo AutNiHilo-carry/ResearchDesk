@@ -31,6 +31,8 @@ let renderedActivity = null;
 let activeCitation = null;
 let renderedHistory = null;
 let historyRecords = null;
+let recoverySuite = null;
+let suiteSubmitting = false;
 let refreshing = false;
 let refreshQueued = false;
 let connected = false;
@@ -67,9 +69,11 @@ function setConnectionLabel(message) {
 }
 
 function syncRunActions() {
-  byId("start").disabled = !connected || submitting || active;
-  byId("stop").disabled = !connected || submitting || !latest?.can_stop;
-  byId("resume").disabled = !connected || submitting || !latest?.can_resume;
+  const suiteBusy = suiteSubmitting || recoverySuite?.status === "running";
+  byId("start").disabled = !connected || submitting || active || suiteBusy;
+  byId("stop").disabled = !connected || submitting || suiteBusy || !latest?.can_stop;
+  byId("resume").disabled = !connected || submitting || suiteBusy || !latest?.can_resume;
+  byId("start-recovery-suite").disabled = !connected || submitting || active || suiteBusy;
   syncDownload("download-summary", "run-summary.json", Boolean(latest));
   syncDownload("download-report", "report.zip", latest?.status === "completed" && Boolean(latest.report));
 }
@@ -294,6 +298,39 @@ async function refreshComparison() {
   }
 }
 
+function renderRecoverySuite(suite) {
+  const wasRunning = recoverySuite?.status === "running";
+  recoverySuite = suite;
+  const state = byId("recovery-suite-state");
+  state.hidden = !suite;
+  if (!suite) return;
+  const finished = suite.cases.filter((item) => item.phase === "finished" || item.phase === "failed").length;
+  const status = states[suite.status];
+  const current = suite.cases.find((item) => item.phase === "injecting" || item.phase === "resuming");
+  const phase = current?.phase === "resuming" ? "正在恢复" : "正在触发中断";
+  const description = status + " · " + finished + "/" + suite.cases.length +
+    (suite.status === "running" && current ? " · " + phase + "：" + recoveryBoundaries[current.boundary] : "");
+  if (state.textContent !== description) state.textContent = description;
+  if (wasRunning && suite.status !== "running" && byId("recovery-comparison").open) void refreshComparison();
+}
+
+async function startRecoverySuite() {
+  if (byId("start-recovery-suite").disabled) return;
+  suiteSubmitting = true;
+  showError();
+  syncRunActions();
+  try {
+    const suite = await request("/api/recovery-suite", { method: "POST" });
+    renderRecoverySuite(suite);
+  } catch (error) {
+    showError(error);
+  } finally {
+    suiteSubmitting = false;
+    syncRunActions();
+    void refresh({ queueIfBusy: true });
+  }
+}
+
 function renderOutcome(run) {
   const panel = byId("run-outcome");
   panel.hidden = !["failed", "interrupted", "budget_exhausted"].includes(run.status);
@@ -401,6 +438,7 @@ async function refresh({ queueIfBusy = false } = {}) {
       if (option.value === "local" || option.value === "web") option.disabled = !snapshot.allow_live;
     }
     active = snapshot.runs.some((run) => run.status === "running");
+    renderRecoverySuite(snapshot.recovery_suite ?? null);
     setMode();
     historyRecords = snapshot.runs;
     renderHistory();
@@ -481,6 +519,7 @@ async function changeRun(path, data) {
   }
 }
 
+byId("start-recovery-suite").addEventListener("click", startRecoverySuite);
 byId("refresh-comparison").addEventListener("click", refreshComparison);
 byId("recovery-comparison").addEventListener("toggle", (event) => {
   if (event.currentTarget.open) void refreshComparison();

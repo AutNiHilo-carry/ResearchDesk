@@ -10,7 +10,8 @@ import sqlite3
 import subprocess
 import sys
 from textwrap import indent
-from threading import RLock
+from threading import Event, RLock, Thread
+from time import monotonic
 from typing import Literal
 from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -121,6 +122,9 @@ class Runs:
         self.allow_live = allow_live
         self.processes = {}
         self.lock = RLock()
+        self.suite_file = self.root / "recovery-suite.json"
+        self.suite_thread = None
+        self.shutting_down = Event()
 
     def job(self, run_id):
         job = child_run_path(self.jobs, run_id)
@@ -181,10 +185,114 @@ class Runs:
                      if ID.fullmatch(job.name) and (job / "job.json").is_file()]
         return sorted(items, key=lambda row: (row["created_at"], row["id"]), reverse=True)
 
+    def suite_active(self):
+        return self.suite_thread is not None and self.suite_thread.is_alive()
+
+    def ensure_manual_run(self):
+        if self.suite_active():
+            raise HTTPException(409, "The offline recovery suite is using the workbench.")
+
     def ensure_idle(self):
         if any(self.running(other) for other in self.jobs.iterdir()
                if ID.fullmatch(other.name) and (other / "job.json").is_file()):
             raise HTTPException(409, "Wait for the current run or stop it first.")
+
+    def start_job(self, request):
+        job = self.jobs / uuid4().hex
+        job.mkdir()
+        recovery_demo = request.mode == "recovery_demo"
+        notes = RECOVERY_DEMO_NOTES if recovery_demo else request.notes
+        if notes:
+            atomic_text(job / "notes.md", notes)
+        question = "离线恢复演示" if recovery_demo else request.question or "证据台账示例"
+        save_json(job / "job.json", dict(mode=request.mode, question=question,
+                                        recovery_point=(request.recovery_point or "report") if recovery_demo else None,
+                                        max_model_calls=(request.recovery_budget or 3) if recovery_demo else request.max_model_calls,
+                                        created_at=now()))
+        self.launch(job, "start")
+        return job
+
+    def suite_state(self):
+        with self.lock:
+            if not self.suite_file.is_file():
+                return None
+            suite = read_json(self.suite_file)
+            if suite["status"] == "running" and not self.suite_active():
+                suite["status"] = "interrupted"
+            return suite
+
+    def save_suite(self, suite):
+        with self.lock:
+            save_json(self.suite_file, suite)
+
+    def start_suite(self):
+        with self.lock:
+            self.ensure_manual_run()
+            self.ensure_idle()
+            suite = dict(id=uuid4().hex, status="running", created_at=now(), cases=[
+                dict(boundary=boundary, model_limit=budget, phase="pending") for boundary, budget in RECOVERY_CASES
+            ])
+            self.save_suite(suite)
+            self.suite_thread = Thread(target=self.run_suite, args=(suite,), name="offline-recovery-suite", daemon=True)
+            self.suite_thread.start()
+            return self.suite_state()
+
+    def wait_for_suite_worker(self, job, process):
+        deadline = monotonic() + 60
+        while process.poll() is None:
+            interrupted = self.shutting_down.wait(0.1)
+            if interrupted or monotonic() >= deadline:
+                with self.lock:
+                    if process.poll() is None:
+                        self.stop(job)
+                return False
+        return not self.shutting_down.is_set()
+
+    def run_suite(self, suite):
+        try:
+            for case in suite["cases"]:
+                with self.lock:
+                    if self.shutting_down.is_set():
+                        break
+                    boundary, budget = case["boundary"], case["model_limit"]
+                    request = ResearchRequest(mode="recovery_demo", recovery_point=boundary,
+                                              recovery_budget=budget if boundary == "model_response" else None)
+                    job = self.start_job(request)
+                    process = self.processes[job.name]
+                    case.update(run_id=job.name, phase="injecting")
+                    self.save_suite(suite)
+                if not self.wait_for_suite_worker(job, process):
+                    case.update(phase="failed", error="worker_stopped")
+                    break
+                with self.lock:
+                    record = self.overview(job)
+                    if not record["can_resume"] or not record["recovery_demo_injected"]:
+                        case.update(phase="failed", outcome=record["status"], error="fault_not_confirmed")
+                        self.save_suite(suite)
+                        continue
+                    if self.shutting_down.is_set():
+                        break
+                    self.launch(job, "resume")
+                    process = self.processes[job.name]
+                    case["phase"] = "resuming"
+                    self.save_suite(suite)
+                if not self.wait_for_suite_worker(job, process):
+                    case.update(phase="failed", error="worker_stopped")
+                    break
+                record = self.overview(job)
+                expected = "budget_exhausted" if budget == 1 else "completed"
+                case.update(phase="finished" if record["status"] == expected and record["resume_count"] == 1 else "failed",
+                            outcome=record["status"])
+                self.save_suite(suite)
+            if self.shutting_down.is_set():
+                suite["status"] = "interrupted"
+            else:
+                suite["status"] = "completed" if all(case["phase"] == "finished" for case in suite["cases"]) else "failed"
+        except Exception as error:
+            suite.update(status="failed", error_type=type(error).__name__)
+        finally:
+            suite["finished_at"] = now()
+            self.save_suite(suite)
 
     def launch(self, job, action):
         save_json(job / "attempt.json", {"status": "starting"})
@@ -321,6 +429,9 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
             try:
                 yield
             finally:
+                runs.shutting_down.set()
+                if runs.suite_thread is not None:
+                    runs.suite_thread.join()
                 for run_id, process in list(runs.processes.items()):
                     if process.poll() is None:
                         runs.stop(runs.job(run_id))
@@ -350,7 +461,15 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
 
     @app.get("/api/runs")
     def history():
-        return dict(allow_live=runs.allow_live, runs=runs.history())
+        suite = runs.suite_state()
+        history = dict(allow_live=runs.allow_live, runs=runs.history())
+        if suite is not None:
+            history["recovery_suite"] = suite
+        return history
+
+    @app.post("/api/recovery-suite", status_code=202)
+    def start_recovery_suite():
+        return runs.start_suite()
 
     @app.get("/api/recovery-comparison")
     def recovery_comparison():
@@ -380,19 +499,9 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
         if request.mode in LIVE_MODES and not runs.allow_live:
             raise HTTPException(403, "Real research requires starting the server with --allow-live.")
         with runs.lock:
+            runs.ensure_manual_run()
             runs.ensure_idle()
-            job = runs.jobs / uuid4().hex
-            job.mkdir()
-            recovery_demo = request.mode == "recovery_demo"
-            notes = RECOVERY_DEMO_NOTES if recovery_demo else request.notes
-            if notes:
-                atomic_text(job / "notes.md", notes)
-            question = "离线恢复演示" if recovery_demo else request.question or "证据台账示例"
-            save_json(job / "job.json", dict(mode=request.mode, question=question,
-                                            recovery_point=(request.recovery_point or "report") if recovery_demo else None,
-                                            max_model_calls=(request.recovery_budget or 3) if recovery_demo else request.max_model_calls,
-                                            created_at=now()))
-            runs.launch(job, "start")
+            job = runs.start_job(request)
             return runs.overview(job)
 
     @app.get("/api/runs/{run_id}")
@@ -448,6 +557,7 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
     @app.post("/api/runs/{run_id}/resume", status_code=202)
     def resume(run_id: str):
         with runs.lock:
+            runs.ensure_manual_run()
             job = runs.job(run_id)
             if not runs.overview(job)["can_resume"]:
                 raise HTTPException(409, "This run is not ready to resume.")
@@ -457,9 +567,11 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
 
     @app.post("/api/runs/{run_id}/stop")
     def stop(run_id: str):
-        job = runs.job(run_id)
-        runs.stop(job)
-        return runs.overview(job)
+        with runs.lock:
+            runs.ensure_manual_run()
+            job = runs.job(run_id)
+            runs.stop(job)
+            return runs.overview(job)
 
     return app
 

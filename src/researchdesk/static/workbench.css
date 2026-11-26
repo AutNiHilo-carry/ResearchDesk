@@ -87,7 +87,7 @@ input[type="number"] { width: 8rem; }
 #recovery-comparison summary { cursor: pointer; font-weight: 650; }
 #comparison-scroll table { min-width: 58rem; }
 #comparison-scroll tbody td:not(:first-child) { white-space: nowrap; }
-#refresh-comparison { margin-top: .65rem; font-size: .875rem; }
+.comparison-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .65rem; font-size: .875rem; }
 #run-activity { margin-bottom: 1rem; padding: .8rem 1rem; }
 #activity-summary { cursor: pointer; font-weight: 650; }
 #activity-events { margin: .65rem 0 0; padding-inline-start: 1.35rem; color: var(--muted); font-size: .875rem; }
