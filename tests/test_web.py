@@ -51,7 +51,7 @@ def test_offline_demo_serves_assets_and_resolves_report_citations(tmp_path, monk
         assert download.headers["content-disposition"] == f'attachment; filename="researchdesk-{run_id}.zip"'
         assert download.headers["cache-control"] == "no-store"
         with ZipFile(BytesIO(download.content)) as bundle:
-            assert bundle.namelist() == ["report.md", "evidence.json"]
+            assert bundle.namelist() == ["report.md", "evidence.json", "run-summary.json"]
             exported = bundle.read("report.md").decode()
             assert exported.startswith(done["report"] + "\n\n")
             assert exported.count(f"### {eid}\n") == 1
@@ -60,6 +60,14 @@ def test_offline_demo_serves_assets_and_resolves_report_citations(tmp_path, monk
                 for line in exported.splitlines()
             )
             assert json.loads(bundle.read("evidence.json")) == done["evidence"]
+            summary = json.loads(bundle.read("run-summary.json"))
+            assert summary == {
+                "schema_version": 1,
+                **{key: done[key] for key in ("id", "mode", "created_at", "status", "resume_count", "model_limit")},
+                "metrics": done["metrics"],
+                "citation_check": done["citation_check"],
+                "recent_activity": done["activity"],
+            }
         assert done["citation_check"] == dict(total=1, matched=1, mismatched=0, missing=0)
         assert done["evidence"][eid]["integrity"] == "valid"
         assert done["metrics"]["provider_requests"] == 0

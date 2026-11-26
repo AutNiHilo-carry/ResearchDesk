@@ -218,6 +218,36 @@ def report_with_evidence(report, citations):
     return report + "\n\n## \u5f15\u7528\u8bc1\u636e\n\n" + "\n\n".join(blocks) + "\n"
 
 
+def read_run_observability(directory):
+    try:
+        metrics, events = run_metrics_snapshot(directory)
+    except sqlite3.Error:
+        metrics, events = {}, []
+    activity = []
+    for event_id, event in reversed(events[-8:]):
+        safe = safe_event(event, event_id)
+        activity.append({key: safe[key] for key in
+                         ("event_id", "event", "tool", "timestamp", "error_code", "will_retry") if key in safe})
+    public_metrics = {key: metrics.get(key) for key in
+                      ("model_calls", "tool_calls", "provider_requests", "tool_successes",
+                       "tool_outcomes", "tool_success_rate", "retry_count", "recovery_replays")}
+    return public_metrics, activity
+
+
+def summarize_citations(report, citations):
+    cited_ids = set(CITATION.findall(report or ""))
+    citation_check = dict(total=len(cited_ids), matched=0, mismatched=0, missing=0)
+    for eid in cited_ids:
+        item = citations.get(eid)
+        if item is None:
+            citation_check["missing"] += 1
+        elif item["integrity"] == "valid":
+            citation_check["matched"] += 1
+        else:
+            citation_check["mismatched"] += 1
+    return citation_check
+
+
 def create_app(output=Path("runs/web"), *, allow_live=False):
     runs = Runs(Path(output), allow_live)
 
@@ -284,43 +314,34 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
         job = runs.job(run_id)
         record = runs.overview(job)
         directory = child_run_path(runs.research, run_id)
-        try:
-            metrics, events = run_metrics_snapshot(directory)
-        except sqlite3.Error:
-            metrics, events = {}, []
-        activity = []
-        for event_id, event in reversed(events[-8:]):
-            safe = safe_event(event, event_id)
-            activity.append({key: safe[key] for key in
-                             ("event_id", "event", "tool", "timestamp", "error_code", "will_retry") if key in safe})
+        metrics, activity = read_run_observability(directory)
         report, citations = None, {}
         if record["status"] == "completed":
             report, citations = read_completed_report(directory)
-        cited_ids = set(CITATION.findall(report or ""))
-        citation_check = dict(total=len(cited_ids), matched=0, mismatched=0, missing=0)
-        for eid in cited_ids:
-            item = citations.get(eid)
-            if item is None:
-                citation_check["missing"] += 1
-            elif item["integrity"] == "valid":
-                citation_check["matched"] += 1
-            else:
-                citation_check["mismatched"] += 1
-        return dict(**record, report=report, evidence=citations, citation_check=citation_check, activity=activity,
-                    metrics={key: metrics.get(key) for key in
-                             ("model_calls", "tool_calls", "provider_requests", "tool_successes",
-                              "tool_outcomes", "tool_success_rate", "retry_count", "recovery_replays")})
+        return dict(**record, report=report, evidence=citations, citation_check=summarize_citations(report, citations),
+                    activity=activity, metrics=metrics)
 
     @app.get("/api/runs/{run_id}/report.zip", response_class=Response)
     def export_report(run_id: str):
         job = runs.job(run_id)
-        if runs.overview(job)["status"] != "completed":
+        record = runs.overview(job)
+        if record["status"] != "completed":
             raise HTTPException(409, "The report is available after the run completes.")
-        report, citations = read_completed_report(child_run_path(runs.research, run_id))
+        directory = child_run_path(runs.research, run_id)
+        report, citations = read_completed_report(directory)
+        metrics, activity = read_run_observability(directory)
+        summary = {
+            "schema_version": 1,
+            **{key: record[key] for key in ("id", "mode", "created_at", "status", "resume_count", "model_limit")},
+            "metrics": metrics,
+            "citation_check": summarize_citations(report, citations),
+            "recent_activity": activity,
+        }
         archive = BytesIO()
         with ZipFile(archive, "w", compression=ZIP_DEFLATED) as bundle:
             bundle.writestr("report.md", report_with_evidence(report, citations))
             bundle.writestr("evidence.json", json.dumps(citations, ensure_ascii=False, indent=2) + "\n")
+            bundle.writestr("run-summary.json", json.dumps(summary, ensure_ascii=False, indent=2) + "\n")
         return Response(archive.getvalue(), media_type="application/zip", headers={
             "Content-Disposition": f'attachment; filename="researchdesk-{run_id}.zip"',
             "Cache-Control": "no-store",
