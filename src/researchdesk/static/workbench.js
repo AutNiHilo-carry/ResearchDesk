@@ -76,6 +76,12 @@ function renderHistory(records) {
   }
 }
 
+const citationIssues = {
+  invalid: "核对未通过",
+  missing: "缺少证据",
+};
+const issueSelector = "#report .citation[data-issue]";
+
 function showEvidence(id, evidence, button) {
   activeCitation?.setAttribute("aria-pressed", "false");
   activeCitation = button;
@@ -83,15 +89,21 @@ function showEvidence(id, evidence, button) {
   byId("evidence-prompt").hidden = true;
   byId("evidence-content").hidden = false;
   byId("evidence-id").textContent = id;
-  byId("source-title").textContent = evidence.title || "来源摘录";
-  byId("evidence-integrity").textContent = evidence.integrity === "valid"
-    ? "摘录与来源原文匹配"
-    : "摘录原文核对未通过";
-  byId("snippet").textContent = evidence.snippet;
-  byId("source-name").textContent = evidence.location || "";
+  const title = byId("source-title");
+  title.hidden = !evidence;
+  title.textContent = evidence?.title || "来源摘录";
+  byId("evidence-integrity").textContent = button.dataset.issue
+    ? citationIssues[button.dataset.issue]
+    : "摘录与来源原文匹配";
+  const snippet = byId("snippet");
+  snippet.hidden = !evidence;
+  snippet.textContent = evidence?.snippet || "";
+  const location = evidence?.location || "";
+  byId("source-name").textContent = location;
   const link = byId("source-link");
-  link.hidden = !/^https?:\/\//i.test(evidence.location || "");
-  if (!link.hidden) link.href = evidence.location;
+  link.hidden = !/^https?:\/\//i.test(location);
+  if (link.hidden) link.removeAttribute("href");
+  else link.href = location;
   const heading = byId("evidence-title");
   heading.focus({ preventScroll: true });
   heading.scrollIntoView({ block: "start", inline: "nearest" });
@@ -119,12 +131,13 @@ function renderReport(run) {
   }
   renderMarkdown(report, run.report, (id) => {
     const evidence = run.evidence[id];
-    if (!evidence) return null;
+    const issue = evidence ? (evidence.integrity === "invalid" ? "invalid" : null) : "missing";
     const citation = document.createElement("button");
     citation.type = "button";
     citation.className = "citation";
-    citation.textContent = id;
-    citation.setAttribute("aria-label", `查看引用 ${id}`);
+    citation.textContent = issue ? id + " · " + citationIssues[issue] : id;
+    if (issue) citation.dataset.issue = issue;
+    citation.setAttribute("aria-label", "查看引用 " + citation.textContent);
     citation.setAttribute("aria-pressed", "false");
     citation.setAttribute("aria-controls", "evidence-content");
     citation.addEventListener("click", () => showEvidence(id, evidence, citation));
@@ -159,6 +172,7 @@ function renderRun(run) {
       " · 未通过 " + check.mismatched + " · 缺失 " + check.missing;
   }
   renderReport(run);
+  byId("locate-citation-issue").hidden = !document.querySelector(issueSelector);
   byId("editor").hidden = true;
   byId("detail").hidden = false;
 }
@@ -220,6 +234,7 @@ async function changeRun(path, data) {
   }
 }
 
+byId("locate-citation-issue").addEventListener("click", () => document.querySelector(issueSelector)?.focus());
 byId("back-to-citation").addEventListener("click", () => activeCitation?.focus());
 byId("compose").addEventListener("click", () => showRun(null));
 byId("mode").addEventListener("change", setMode);

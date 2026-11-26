@@ -105,6 +105,9 @@ input[type="number"] { width: 8rem; }
   padding: .1rem .32rem; margin: 0 .18rem; font: 650 .875rem/1.45 "Segoe UI", sans-serif;
 }
 .citation[aria-pressed="true"], .citation:hover { background: #cae8d8; border-color: #7aa890; }
+.citation[data-issue] { background: #fff3df; border-color: #c69255; color: #704315; }
+.citation[data-issue][aria-pressed="true"], .citation[data-issue]:hover { background: #f8dfbd; }
+#locate-citation-issue { margin-block: .6rem; font-size: .875rem; }
 .evidence h3 { overflow-wrap: anywhere; }
 #evidence-title { scroll-margin-top: 1rem; }
 #back-to-citation { margin-bottom: .9rem; font-size: .875rem; }
