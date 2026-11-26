@@ -5,6 +5,10 @@ const states = {
   running: "运行中", completed: "已完成", interrupted: "已中断",
   failed: "失败", budget_exhausted: "额度用尽",
 };
+const historyDate = new Intl.DateTimeFormat("zh-CN", {
+  year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+});
 const modes = { demo: "离线示例", local: "本地资料", web: "网页研究" };
 const messages = {
   403: "真实研究未启用，请使用离线示例或重新启动服务。",
@@ -51,9 +55,12 @@ function setMode() {
 function renderHistory() {
   if (!historyRecords) return;
   const query = byId("history-search").value.trim().toLowerCase();
+  const status = byId("history-status").value;
   const records = historyRecords.filter((run) =>
-    run.question.toLowerCase().includes(query) || run.id.includes(query));
-  const key = JSON.stringify([selection, Boolean(query), records]);
+    (!status || run.status === status) &&
+    (run.question.toLowerCase().includes(query) || run.id.includes(query)));
+  const filtering = Boolean(query || status);
+  const key = JSON.stringify([selection, filtering, records]);
   if (key === renderedHistory) return;
   renderedHistory = key;
   const nav = byId("history");
@@ -61,7 +68,7 @@ function renderHistory() {
   if (!records.length) {
     const empty = document.createElement("p");
     empty.className = "muted";
-    empty.textContent = query ? "没有匹配的运行记录" : "暂无运行记录";
+    empty.textContent = filtering ? "没有匹配的运行记录" : "暂无运行记录";
     nav.append(empty);
   }
   for (const run of records) {
@@ -76,6 +83,14 @@ function renderHistory() {
     meta.className = "history-meta";
     meta.textContent = `${modes[run.mode]} · ${states[run.status]}`;
     button.append(title, meta);
+    const created = new Date(run.created_at);
+    if (Number.isFinite(created.getTime())) {
+      const timestamp = document.createElement("time");
+      timestamp.className = "history-meta";
+      timestamp.dateTime = run.created_at;
+      timestamp.textContent = historyDate.format(created);
+      button.append(timestamp);
+    }
     button.addEventListener("click", () => showRun(run.id));
     nav.append(button);
   }
@@ -243,6 +258,11 @@ async function changeRun(path, data) {
 byId("locate-citation-issue").addEventListener("click", () => document.querySelector(issueSelector)?.focus());
 byId("back-to-citation").addEventListener("click", () => activeCitation?.focus());
 byId("history-search").addEventListener("input", renderHistory);
+const historyStatus = byId("history-status");
+for (const [status, label] of Object.entries(states)) {
+  historyStatus.add(new Option(label, status));
+}
+historyStatus.addEventListener("change", renderHistory);
 byId("compose").addEventListener("click", () => showRun(null));
 byId("mode").addEventListener("change", setMode);
 byId("research-form").addEventListener("submit", (event) => {

@@ -25,7 +25,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid #67ac91; outline-offs
 .layout { display: grid; grid-template-columns: 16.5rem minmax(0, 1fr); min-height: calc(100dvh - 4rem); }
 .rail { background: #eff5f1; border-right: 1px solid var(--line); padding: 1.5rem 1rem; }
 .rail h2 { font-size: .9rem; color: var(--muted); margin: 1.7rem .5rem .6rem; }
-#history-search { margin-bottom: .55rem; font-size: .875rem; }
+#history-search, #history-status { margin-bottom: .55rem; font-size: .875rem; }
 .new-run, .history-item { width: 100%; text-align: left; border-radius: 9px; }
 .new-run {
   display: flex; gap: .6rem; align-items: center; padding: .7rem .8rem; border: 1px solid #9ebfad;
