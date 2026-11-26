@@ -11,7 +11,7 @@
 <body>
   <header class="masthead">
     <div class="identity"><span class="mark" aria-hidden="true">R</span><span>ResearchDesk</span></div>
-    <span class="connection" id="connection">连接中</span>
+    <span class="connection" id="connection" role="status">连接中</span>
   </header>
   <div class="layout">
     <aside class="rail">
@@ -25,6 +25,7 @@
       <nav id="history" aria-label="运行记录"><p class="muted">读取本地运行记录…</p></nav>
     </aside>
     <main>
+      <div id="refresh-error" class="notice error" role="status" hidden></div>
       <div id="error" class="notice error" role="alert" hidden></div>
       <section id="editor" aria-labelledby="editor-title">
         <h1 id="editor-title">新建研究</h1>

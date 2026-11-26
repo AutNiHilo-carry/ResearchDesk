@@ -24,11 +24,19 @@ let activeCitation = null;
 let renderedHistory = null;
 let historyRecords = null;
 let refreshing = false;
+let connected = false;
 let submitting = false;
 let active = false;
 
-async function request(path, options) {
-  const response = await fetch(path, options);
+class ConnectionError extends Error {}
+
+async function request(path, options = { signal: AbortSignal.timeout(8000) }) {
+  let response;
+  try {
+    response = await fetch(path, options);
+  } catch {
+    throw new ConnectionError("无法连接本地服务");
+  }
   if (!response.ok) throw new Error(messages[response.status] || "操作失败，请重试。");
   return response.json();
 }
@@ -36,6 +44,32 @@ async function request(path, options) {
 function showError(error = null) {
   byId("error").hidden = !error;
   byId("error").textContent = error?.message || "";
+}
+
+function showRefreshError(message = "") {
+  const warning = byId("refresh-error");
+  warning.hidden = !message;
+  if (warning.textContent !== message) warning.textContent = message;
+}
+
+function setConnectionLabel(message) {
+  const label = byId("connection");
+  if (label.textContent !== message) label.textContent = message;
+}
+
+function syncRunActions() {
+  byId("start").disabled = !connected || submitting || active;
+  byId("stop").disabled = !connected || submitting || !latest?.can_stop;
+  byId("resume").disabled = !connected || submitting || !latest?.can_resume;
+  const download = byId("download-report");
+  download.hidden = latest?.status !== "completed" || !latest.report;
+  if (download.hidden || !connected) {
+    download.removeAttribute("href");
+    download.setAttribute("aria-disabled", "true");
+  } else {
+    download.href = "/api/runs/" + encodeURIComponent(latest.id) + "/report.zip";
+    download.removeAttribute("aria-disabled");
+  }
 }
 
 function setMode() {
@@ -50,7 +84,7 @@ function setMode() {
     web: "提交后会调用模型服务和搜索服务。",
   }[mode];
   byId("start").textContent = mode === "demo" ? "运行离线示例" : "开始研究";
-  byId("start").disabled = submitting || active;
+  syncRunActions();
 }
 
 function renderHistory() {
@@ -211,10 +245,7 @@ function renderRun(run) {
     ? `${run.metrics.model_calls ?? "—"} / ${run.model_limit}` : run.metrics.model_calls ?? "—";
   byId("tool-calls").textContent = run.metrics.tool_calls ?? "—";
   byId("provider-requests").textContent = run.metrics.provider_requests ?? "—";
-  const download = byId("download-report");
-  download.hidden = run.status !== "completed" || !run.report;
-  if (download.hidden) download.removeAttribute("href");
-  else download.href = `/api/runs/${encodeURIComponent(run.id)}/report.zip`;
+  syncRunActions();
   const check = run.citation_check;
   const summary = byId("citation-check");
   summary.hidden = !run.report || !check;
@@ -233,9 +264,11 @@ function renderRun(run) {
 async function refresh() {
   if (refreshing) return;
   refreshing = true;
+  let selected = null;
   try {
     const snapshot = await request("/api/runs");
-    byId("connection").textContent = snapshot.allow_live ? "本地 · 支持真实研究" : "本地 · 离线模式";
+    connected = true;
+    setConnectionLabel(snapshot.allow_live ? "本地 · 支持真实研究" : "本地 · 离线模式");
     for (const option of byId("mode").options) {
       if (option.value !== "demo") option.disabled = !snapshot.allow_live;
     }
@@ -243,14 +276,22 @@ async function refresh() {
     setMode();
     historyRecords = snapshot.runs;
     renderHistory();
-    const selected = selection;
+    selected = selection;
     if (selected) {
       const run = await request(`/api/runs/${encodeURIComponent(selected)}`);
       if (selection === selected) renderRun(run);
     }
+    showRefreshError();
   } catch (error) {
-    showError(error);
+    if (!selected || error instanceof ConnectionError) {
+      connected = false;
+      setConnectionLabel("连接中断");
+      showRefreshError("暂时无法刷新运行记录，正在自动重连。");
+    } else if (selection === selected) {
+      showRefreshError(error.message);
+    }
   } finally {
+    syncRunActions();
     refreshing = false;
   }
 }
@@ -259,6 +300,8 @@ function showRun(id) {
   selection = id;
   latest = null;
   showError();
+  showRefreshError();
+  syncRunActions();
   history.replaceState(null, "", id ? `#${id}` : location.pathname);
   if (!id) {
     byId("editor").hidden = false;
@@ -268,12 +311,10 @@ function showRun(id) {
 }
 
 async function changeRun(path, data) {
-  if (submitting) return;
+  if (!connected || submitting) return;
   submitting = true;
   showError();
   setMode();
-  byId("resume").disabled = true;
-  byId("stop").disabled = true;
   try {
     const run = await request(path, { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data ?? {}) });
@@ -282,8 +323,6 @@ async function changeRun(path, data) {
     showError(error);
   } finally {
     submitting = false;
-    byId("resume").disabled = false;
-    byId("stop").disabled = false;
     setMode();
   }
 }

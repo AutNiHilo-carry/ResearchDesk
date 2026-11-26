@@ -87,7 +87,8 @@ input[type="number"] { width: 8rem; }
 .report-header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: .5rem; margin-bottom: .8rem; }
 .report-header h2 { margin: 0; }
 #download-report { font-size: .875rem; text-decoration: none; }
-#download-report:hover { background: var(--wash); }
+#download-report[aria-disabled="true"] { opacity: .6; cursor: default; }
+#download-report:not([aria-disabled]):hover { background: var(--wash); }
 .prose { line-height: 1.75; overflow-wrap: anywhere; }
 .prose h3, .prose h4, .prose h5, .prose h6 { margin: 1rem 0 .45rem; line-height: 1.45; }
 .prose h3 { font-size: 1.3rem; }
