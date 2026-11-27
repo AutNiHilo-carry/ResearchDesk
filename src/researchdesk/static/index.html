@@ -72,7 +72,11 @@
         </form>
         <details id="recovery-comparison" class="surface">
           <summary>离线恢复对照</summary>
-          <p class="help">每种场景显示最近一条已结束的恢复演示。数值按中断前 → 恢复后显示。</p>
+          <p id="comparison-help" class="help">每种场景显示最近一条已结束的恢复演示。数值按中断前 → 恢复后显示。</p>
+          <label for="comparison-batch">对照范围</label>
+          <select id="comparison-batch" aria-controls="comparison-scroll" disabled>
+            <option value="">按场景查看最近记录</option>
+          </select>
           <div id="comparison-scroll" class="table-scroll" tabindex="0" role="region" aria-label="离线恢复对照表" hidden>
             <table>
               <thead>

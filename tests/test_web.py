@@ -289,6 +289,9 @@ def test_offline_recovery_suite_continues_after_server_restart(tmp_path, monkeyp
             assert started["status"] == "running"
             review_path = f"/api/recovery-suite/{started['id']}/review.zip"
             assert client.get(review_path).status_code == 409
+            archived_comparison = f"/api/recovery-suite/{started['id']}/comparison"
+            assert client.get(archived_comparison).status_code == 409
+            assert client.get("/api/recovery-suites").json() == {"suites": []}
             assert client.post("/api/recovery-suite").status_code == 409
             assert client.post("/api/runs", json={"mode": "demo"}).status_code == 409
             assert reached_receipt.wait(90)
@@ -320,6 +323,12 @@ def test_offline_recovery_suite_continues_after_server_restart(tmp_path, monkeyp
             record = restarted.get(f"/api/runs/{row['id']}").json()
             assert record["metrics"]["provider_requests"] == 0 and record["resume_count"] == 1
         assert restarted.post("/api/recovery-suite/resume").status_code == 409
+        archived = restarted.get(archived_comparison)
+        assert archived.status_code == 200
+        assert [row["run"]["id"] for row in archived.json()["cases"]] == [item["run_id"] for item in suite["cases"]]
+        list_response = restarted.get("/api/recovery-suites")
+        assert list_response.headers["cache-control"] == "no-store"
+        assert list_response.json() == {"suites": [{key: suite[key] for key in ("id", "created_at", "finished_at")}]}
         response = restarted.get(review_path)
         assert response.status_code == 200 and response.headers["cache-control"] == "no-store"
         assert response.headers["content-type"] == "application/zip"
@@ -369,6 +378,8 @@ def test_offline_recovery_suite_continues_after_server_restart(tmp_path, monkeyp
         assert restarted.get("/api/runs").json()["recovery_suite"] == suite
         replacement = restarted.post("/api/recovery-suite")
         assert replacement.status_code == 202 and replacement.json()["id"] != started["id"]
+        assert restarted.get(archived_comparison).json() == archived.json()
+        assert restarted.get("/api/recovery-suites").json() == list_response.json()
         old_review = restarted.get(review_path)
         assert old_review.status_code == 200
         with ZipFile(BytesIO(old_review.content)) as review:

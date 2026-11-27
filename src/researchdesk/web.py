@@ -236,6 +236,21 @@ class Runs:
             self.archive_suite(suite)
             save_json(self.suite_file, suite)
 
+    def completed_suites(self):
+        with self.lock:
+            summaries = {}
+            for path in self.suite_archive.glob("*.json"):
+                if not ID.fullmatch(path.stem):
+                    continue
+                record = read_json(path)
+                if record["status"] == "completed" and record["id"] == path.stem:
+                    summaries[path.stem] = record
+            current = self.suite_state()
+            if current and current["status"] == "completed":
+                summaries.setdefault(current["id"], current)
+        ordered = sorted(summaries.values(), key=lambda suite: (suite["finished_at"], suite["id"]), reverse=True)
+        return [{key: suite[key] for key in ("id", "created_at", "finished_at")} for suite in ordered]
+
     def completed_suite(self, suite_id):
         if not ID.fullmatch(suite_id):
             raise HTTPException(404, "Recovery suite not found.")
@@ -249,6 +264,20 @@ class Runs:
             if current["status"] != "completed":
                 raise HTTPException(409, "The recovery suite must complete before export.")
             return current
+
+    def archived_run(self, case):
+        run_id = case["run_id"]
+        try:
+            job = self.job(run_id)
+        except HTTPException as error:
+            raise HTTPException(409, "An archived run is missing.") from error
+        record = self.overview(job)
+        if (record["mode"] != "recovery_demo" or record["status"] != case["outcome"]
+                or record["model_limit"] != case["model_limit"]
+                or record["recovery_demo_boundary"] != case["boundary"]
+                or not record["recovery_demo_injected"] or not record["resume_count"]):
+            raise HTTPException(409, "The saved run does not match its recovery suite.")
+        return job, record
 
     def start_suite(self, *, resume=False):
         with self.lock:
@@ -571,6 +600,23 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
     def resume_recovery_suite():
         return runs.start_suite(resume=True)
 
+    @app.get("/api/recovery-suites")
+    def list_recovery_suites():
+        return JSONResponse({"suites": runs.completed_suites()}, headers={"Cache-Control": "no-store"})
+
+    def comparison_run(job, record):
+        directory = child_run_path(runs.research, record["id"])
+        metrics, _ = read_run_observability(directory)
+        return dict(id=record["id"], status=record["status"], before=recovery_demo_before(record, job),
+                    after={key: metrics[key] for key in COMPARISON_METRICS})
+
+    @app.get("/api/recovery-suite/{suite_id}/comparison")
+    def archived_recovery_comparison(suite_id: str):
+        suite = runs.completed_suite(suite_id)
+        cases = [dict(boundary=case["boundary"], model_limit=case["model_limit"],
+                      run=comparison_run(*runs.archived_run(case))) for case in suite["cases"]]
+        return JSONResponse({"cases": cases}, headers={"Cache-Control": "no-store"})
+
     @app.get("/api/recovery-suite/{suite_id}/review.zip", response_class=Response)
     def export_recovery_suite(suite_id: str):
         suite = runs.completed_suite(suite_id)
@@ -579,17 +625,8 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
         with ZipFile(archive, "w", compression=ZIP_DEFLATED) as bundle:
             for case in suite["cases"]:
                 run_id = case["run_id"]
-                try:
-                    job = runs.job(run_id)
-                except HTTPException as error:
-                    raise HTTPException(409, "An archived run is missing.") from error
+                job, record = runs.archived_run(case)
                 directory = child_run_path(runs.research, run_id)
-                record = runs.overview(job)
-                if (record["mode"] != "recovery_demo" or record["status"] != case["outcome"]
-                        or record["model_limit"] != case["model_limit"]
-                        or record["recovery_demo_boundary"] != case["boundary"]
-                        or not record["recovery_demo_injected"] or not record["resume_count"]):
-                    raise HTTPException(409, "The saved run does not match its recovery suite.")
                 prefix = f"runs/{run_id}/"
                 citation_check = None
                 if record["status"] == "completed":
@@ -620,11 +657,7 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
             record = latest.get((boundary, budget))
             result = None
             if record:
-                run_id = record["id"]
-                metrics, _ = read_run_observability(child_run_path(runs.research, run_id))
-                result = dict(id=run_id, status=record["status"],
-                              before=recovery_demo_before(record, runs.job(run_id)),
-                              after={key: metrics[key] for key in COMPARISON_METRICS})
+                result = comparison_run(runs.job(record["id"]), record)
             cases.append(dict(boundary=boundary, model_limit=budget, run=result))
         return JSONResponse({"cases": cases}, headers={"Cache-Control": "no-store"})
 

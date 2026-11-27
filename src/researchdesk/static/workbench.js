@@ -32,6 +32,8 @@ let activeCitation = null;
 let renderedHistory = null;
 let historyRecords = null;
 let recoverySuite = null;
+let loadedComparisonBatch = null;
+let comparisonRefreshQueued = false;
 let suiteSubmitting = false;
 let refreshing = false;
 let refreshQueued = false;
@@ -80,8 +82,11 @@ function syncRunActions() {
   const runPath = latest ? "/api/runs/" + encodeURIComponent(latest.id) : null;
   syncDownload("download-summary", runPath && runPath + "/run-summary.json");
   syncDownload("download-report", latest?.status === "completed" && latest.report ? runPath + "/report.zip" : null);
-  const suitePath = recoverySuite?.status === "completed"
-    ? "/api/recovery-suite/" + encodeURIComponent(recoverySuite.id) + "/review.zip" : null;
+  const selectedBatch = byId("comparison-batch").value;
+  const downloadableBatch = selectedBatch
+    ? (loadedComparisonBatch === selectedBatch ? selectedBatch : null)
+    : recoverySuite?.status === "completed" ? recoverySuite.id : null;
+  const suitePath = downloadableBatch ? "/api/recovery-suite/" + encodeURIComponent(downloadableBatch) + "/review.zip" : null;
   syncDownload("download-recovery-suite", suitePath);
 }
 
@@ -265,13 +270,32 @@ const comparisonMetrics = ["model_calls", "tool_calls", "retry_count", "recovery
 
 async function refreshComparison() {
   const button = byId("refresh-comparison");
-  if (button.disabled) return;
+  if (button.disabled) {
+    comparisonRefreshQueued = true;
+    return;
+  }
+  const select = byId("comparison-batch");
   button.disabled = true;
+  select.disabled = true;
+  if (loadedComparisonBatch !== select.value) {
+    byId("comparison-scroll").hidden = true;
+    syncRunActions();
+  }
   const message = byId("comparison-message");
   message.hidden = false;
   message.textContent = "正在读取演示记录…";
   try {
-    const { cases } = await request("/api/recovery-comparison");
+    const selected = select.value;
+    const { suites } = await request("/api/recovery-suites");
+    select.options.length = 1;
+    for (const suite of suites) {
+      const date = historyDate.format(new Date(suite.finished_at));
+      select.add(new Option(date + " · " + suite.id.slice(0, 8), suite.id));
+    }
+    select.value = suites.some((suite) => suite.id === selected) ? selected : "";
+    const path = select.value ? "/api/recovery-suite/" + encodeURIComponent(select.value) + "/comparison"
+      : "/api/recovery-comparison";
+    const { cases } = await request(path);
     const rows = byId("comparison-rows");
     rows.replaceChildren();
     for (const scenario of cases) {
@@ -296,12 +320,23 @@ async function refreshComparison() {
           : "—";
       }
     }
+    loadedComparisonBatch = select.value;
+    byId("comparison-help").textContent = (loadedComparisonBatch
+      ? "显示所选批次的五条原运行。"
+      : "每种场景显示最近一条已结束的恢复演示。")
+      + "数值按中断前 → 恢复后显示。";
     byId("comparison-scroll").hidden = false;
     message.hidden = true;
   } catch {
     message.textContent = "暂时无法读取对照记录，请刷新重试。";
   } finally {
     button.disabled = false;
+    select.disabled = false;
+    syncRunActions();
+    if (comparisonRefreshQueued) {
+      comparisonRefreshQueued = false;
+      void refreshComparison();
+    }
   }
 }
 
@@ -529,6 +564,7 @@ async function changeRun(path, data) {
 byId("start-recovery-suite").addEventListener("click", () => startRecoverySuite());
 byId("resume-recovery-suite").addEventListener("click", () => startRecoverySuite(true));
 byId("refresh-comparison").addEventListener("click", refreshComparison);
+byId("comparison-batch").addEventListener("change", refreshComparison);
 byId("recovery-comparison").addEventListener("toggle", (event) => {
   if (event.currentTarget.open) void refreshComparison();
 });
