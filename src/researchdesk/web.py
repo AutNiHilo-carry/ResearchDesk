@@ -25,6 +25,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .citations import CITATION
 from .ledger import now
 from .inspect_run import safe_event
+from .recovery_bundle import COMPARISON_METRICS, EVIDENCE_APPENDIX, RECOVERY_CASES, write_checksums
 from .run_metrics import run_metrics_snapshot
 from .storage import RecoveryError, RunLock, atomic_text
 from .verification import evidence_context, load_run
@@ -32,8 +33,6 @@ from .verification import evidence_context, load_run
 ID = re.compile(r"[0-9a-f]{32}")
 STATIC = Path(__file__).with_name("static")
 LIVE_MODES = {"local", "web"}
-RECOVERY_CASES = (("report", 3), ("receipt", 3), ("evidence", 3), ("model_response", 3), ("model_response", 1))
-COMPARISON_METRICS = ("model_calls", "tool_calls", "retry_count", "recovery_replays", "evidence_count")
 RECOVERY_DEMO_NOTES = "ResearchDesk saves source evidence before publishing the report."
 WORKER = "from researchdesk.web import worker; import sys; raise SystemExit(worker(*sys.argv[1:]))"
 
@@ -404,7 +403,7 @@ def report_with_evidence(report, citations):
         blocks.append(f"### {evidence_id}\n\n{indent(excerpt, '    ')}")
     if not blocks:
         return report
-    return report + "\n\n## \u5f15\u7528\u8bc1\u636e\n\n" + "\n\n".join(blocks) + "\n"
+    return report + EVIDENCE_APPENDIX + "\n\n".join(blocks) + "\n"
 
 
 def read_run_observability(directory):
@@ -603,6 +602,7 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
                 results.append((case, summary))
             write_json_member(bundle, "batch.json", {"schema_version": 1, **suite})
             bundle.writestr("comparison.md", suite_comparison_markdown(suite, results))
+            write_checksums(bundle)
         return zip_download(archive, f"researchdesk-recovery-{suite_id}.zip")
 
     @app.get("/api/recovery-comparison")

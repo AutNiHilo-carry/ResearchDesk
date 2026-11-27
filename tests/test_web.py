@@ -12,7 +12,7 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
-from researchdesk import storage, web
+from researchdesk import recovery_bundle, storage, web
 
 
 def wait_for(client, run_id, ready, timeout=45):
@@ -323,8 +323,10 @@ def test_offline_recovery_suite_continues_after_server_restart(tmp_path, monkeyp
         response = restarted.get(review_path)
         assert response.status_code == 200 and response.headers["cache-control"] == "no-store"
         assert response.headers["content-type"] == "application/zip"
+        verified = recovery_bundle.verify_batch(BytesIO(response.content))
+        assert verified == dict(batch_id=suite["id"], cases=5, reports=4, budget_stops=1, missing_before_snapshots=0)
         with ZipFile(BytesIO(response.content)) as review:
-            assert len(review.namelist()) == 15
+            assert len(review.namelist()) == 16
             assert review.testzip() is None
             assert json.loads(review.read("batch.json")) == {"schema_version": 1, **suite}
             comparison = review.read("comparison.md").decode()
@@ -340,6 +342,28 @@ def test_offline_recovery_suite_continues_after_server_restart(tmp_path, monkeyp
                 else:
                     assert prefix + "report.md" not in review.namelist()
                     assert prefix + "evidence.json" not in review.namelist()
+
+        with ZipFile(BytesIO(response.content)) as review:
+            files = {name: review.read(name) for name in review.namelist()}
+        changed = BytesIO()
+        with ZipFile(changed, "w") as tampered:
+            for name, content in files.items():
+                tampered.writestr(name, content + b"changed" if name == "comparison.md" else content)
+        with pytest.raises(recovery_bundle.BundleError, match="Checksum mismatch"):
+            recovery_bundle.verify_batch(changed)
+
+        wrong_link = BytesIO()
+        first_summary = f"runs/{suite['cases'][0]['run_id']}/run-summary.json"
+        summary = json.loads(files[first_summary])
+        summary["recovery_suite_id"] = "0" * 32
+        files[first_summary] = json.dumps(summary).encode()
+        with ZipFile(wrong_link, "w") as tampered:
+            for name, content in files.items():
+                if name != recovery_bundle.MANIFEST:
+                    tampered.writestr(name, content)
+            recovery_bundle.write_checksums(tampered)
+        with pytest.raises(recovery_bundle.BundleError, match="does not match the batch"):
+            recovery_bundle.verify_batch(wrong_link)
 
     with TestClient(web.create_app(tmp_path), base_url=base_url) as restarted:
         assert restarted.get("/api/runs").json()["recovery_suite"] == suite
