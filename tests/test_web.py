@@ -361,8 +361,41 @@ def test_offline_recovery_suite_continues_after_server_restart(tmp_path, monkeyp
         with pytest.raises(recovery_bundle.BundleError, match="Checksum mismatch"):
             recovery_bundle.verify_batch(changed)
 
-        wrong_link = BytesIO()
+        baseline = tmp_path / "baseline.zip"
+        baseline.write_bytes(response.content)
+        assert recovery_bundle.compare_batches(baseline, baseline)["status"] == "matching"
         first_summary = f"runs/{suite['cases'][0]['run_id']}/run-summary.json"
+
+        def repack_summary(name, summary):
+            path = tmp_path / name
+            with ZipFile(path, "w") as candidate:
+                for member, content in files.items():
+                    if member != recovery_bundle.MANIFEST:
+                        candidate.writestr(member, json.dumps(summary).encode() if member == first_summary else content)
+                recovery_bundle.write_checksums(candidate)
+            return path
+
+        summary = json.loads(files[first_summary])
+        summary["metrics"]["retry_count"] += 1
+        changed_bundle = repack_summary("changed.zip", summary)
+        changes = recovery_bundle.compare_batches(baseline, changed_bundle)
+        assert changes["status"] == "different" and changes["changed_cases"] == 1
+        assert changes["cases"][0]["changes"] == [
+            {"phase": "after", "metric": "retry_count", "baseline": 0, "candidate": 1},
+        ]
+        assert recovery_bundle.main([str(changed_bundle), "--baseline", str(baseline)]) == 1
+
+        summary = json.loads(files[first_summary])
+        del summary["recovery_demo_before"]["evidence_count"]
+        incomplete = repack_summary("older.zip", summary)
+        missing = recovery_bundle.compare_batches(baseline, incomplete)
+        assert missing["status"] == "incomplete" and missing["incomplete_cases"] == 1
+        assert missing["cases"][0]["unavailable"] == [
+            {"phase": "before", "metric": "evidence_count", "baseline": 1, "candidate": None},
+        ]
+        assert recovery_bundle.main([str(incomplete), "--baseline", str(baseline)]) == 2
+
+        wrong_link = BytesIO()
         summary = json.loads(files[first_summary])
         summary["recovery_suite_id"] = "0" * 32
         files[first_summary] = json.dumps(summary).encode()

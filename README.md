@@ -59,6 +59,12 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m researchdesk.recovery_bundle ".\researchdesk-recovery-BATCH_ID.zip"
 ```
 
+对比两个复验包时，用 `--baseline` 指定基线。命令校验两个 ZIP，然后按断点和预算一一对齐，输出恢复前后计数、恢复次数的差异与缺失项。退出码 0 表示完全匹配，1 表示有差异或校验失败，2 表示已知数据匹配但有缺失项。
+
+```powershell
+.\.venv\Scripts\python.exe -m researchdesk.recovery_bundle ".\candidate.zip" --baseline ".\baseline.zip"
+```
+
 ## 真实研究与恢复
 
 真实研究调用 DeepSeek / Tavily，会产生费用；先按快速开始配置本地 `.env`。doctor 只检查配置存在性，不验证密钥有效性。

@@ -1,4 +1,4 @@
-"""Verify exported offline recovery bundles without running a research job."""
+"""Verify or compare offline recovery bundles without running a research job."""
 import argparse
 import hashlib
 import json
@@ -59,7 +59,7 @@ def count(value):
     return type(value) is int and value >= 0
 
 
-def verify_batch(path):
+def read_verified_batch(path):
     with ZipFile(path) as archive:
         files = read_verified_members(archive)
     batch = json_object(files, "batch.json")
@@ -75,6 +75,7 @@ def verify_batch(path):
     run_ids = set()
     reports = 0
     missing_snapshots = 0
+    run_summaries = []
     for case in cases:
         run_id = case["run_id"]
         point, budget = case["boundary"], case["model_limit"]
@@ -99,6 +100,7 @@ def verify_batch(path):
         if (any(not count(metrics.get(key)) for key in COMPARISON_METRICS)
                 or metrics["model_calls"] > budget or metrics.get("provider_requests") != 0):
             raise BundleError(f"Invalid run counters: {run_id}.")
+        run_summaries.append(summary)
         before = summary["recovery_demo_before"]
         if before is None:
             missing_snapshots += 1
@@ -127,19 +129,54 @@ def verify_batch(path):
     if files.keys() != expected_files or suite_id not in comparison:
         raise BundleError("Unexpected files or batch reference.")
     return dict(batch_id=suite_id, cases=len(cases), reports=reports, budget_stops=len(cases) - reports,
-                missing_before_snapshots=missing_snapshots)
+                missing_before_snapshots=missing_snapshots), run_summaries
+
+
+def verify_batch(path):
+    summary, _ = read_verified_batch(path)
+    return summary
+
+
+def compare_batches(baseline, candidate):
+    base, base_runs = read_verified_batch(baseline)
+    new, new_runs = read_verified_batch(candidate)
+    cases = []
+    for (boundary, budget), left, right in zip(RECOVERY_CASES, base_runs, new_runs, strict=True):
+        changes, unavailable = [], []
+        for phase, field in (("before", "recovery_demo_before"), ("after", "metrics")):
+            for metric in COMPARISON_METRICS:
+                previous = (left[field] or {}).get(metric)
+                current = (right[field] or {}).get(metric)
+                if previous is None or current is None:
+                    unavailable.append(dict(phase=phase, metric=metric, baseline=previous, candidate=current))
+                elif previous != current:
+                    changes.append(dict(phase=phase, metric=metric, baseline=previous, candidate=current))
+        if left["resume_count"] != right["resume_count"]:
+            changes.append(dict(phase="after", metric="resume_count",
+                                baseline=left["resume_count"], candidate=right["resume_count"]))
+        cases.append(dict(boundary=boundary, model_limit=budget, outcome=right["status"],
+                          baseline_run_id=left["id"], candidate_run_id=right["id"],
+                          changes=changes, unavailable=unavailable))
+    changed_cases = sum(bool(case["changes"]) for case in cases)
+    incomplete_cases = sum(bool(case["unavailable"]) for case in cases)
+    status = "different" if changed_cases else "incomplete" if incomplete_cases else "matching"
+    return dict(status=status, baseline_batch_id=base["batch_id"], candidate_batch_id=new["batch_id"],
+                changed_cases=changed_cases, incomplete_cases=incomplete_cases, cases=cases)
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("bundle", type=Path, help="A downloaded ResearchDesk recovery review ZIP")
+    parser.add_argument("--baseline", type=Path, help="Compare the verified bundle with this baseline ZIP")
     args = parser.parse_args(argv)
     try:
-        result = verify_batch(args.bundle)
+        result = compare_batches(args.baseline, args.bundle) if args.baseline else verify_batch(args.bundle)
     except (OSError, ValueError, TypeError, KeyError, AttributeError, RuntimeError, BadZipFile, CompressionError) as error:
         print(f"Verification failed: {error}", file=sys.stderr)
         return 1
     print(json.dumps(result, indent=2))
+    if args.baseline:
+        return {"matching": 0, "different": 1, "incomplete": 2}[result["status"]]
     return 0
 
 
