@@ -123,6 +123,7 @@ class Runs:
         self.processes = {}
         self.lock = RLock()
         self.suite_file = self.root / "recovery-suite.json"
+        self.suite_archive = self.root / "recovery-suites"
         self.suite_thread = None
         self.shutting_down = Event()
 
@@ -218,12 +219,37 @@ class Runs:
                 return None
             suite = read_json(self.suite_file)
             if suite["status"] == "running" and not self.suite_active():
+                archived = self.suite_archive / (suite["id"] + ".json")
+                if archived.is_file():
+                    return read_json(archived)
                 suite["status"] = "interrupted"
             return suite
 
+    def archive_suite(self, suite):
+        if suite and suite["status"] == "completed":
+            self.suite_archive.mkdir(exist_ok=True)
+            path = self.suite_archive / (suite["id"] + ".json")
+            if not path.is_file():
+                save_json(path, suite)
+
     def save_suite(self, suite):
         with self.lock:
+            self.archive_suite(suite)
             save_json(self.suite_file, suite)
+
+    def completed_suite(self, suite_id):
+        if not ID.fullmatch(suite_id):
+            raise HTTPException(404, "Recovery suite not found.")
+        with self.lock:
+            archived = self.suite_archive / (suite_id + ".json")
+            if archived.is_file():
+                return read_json(archived)
+            current = self.suite_state()
+            if not current or current["id"] != suite_id:
+                raise HTTPException(404, "Recovery suite not found.")
+            if current["status"] != "completed":
+                raise HTTPException(409, "The recovery suite must complete before export.")
+            return current
 
     def start_suite(self, *, resume=False):
         with self.lock:
@@ -235,6 +261,7 @@ class Runs:
                     raise HTTPException(409, "There is no interrupted recovery suite.")
                 suite.pop("finished_at", None)
             else:
+                self.archive_suite(self.suite_state())
                 suite = dict(id=uuid4().hex, created_at=now(), cases=[
                     dict(boundary=boundary, model_limit=budget, phase="pending") for boundary, budget in RECOVERY_CASES
                 ])
@@ -443,6 +470,50 @@ def build_run_summary(record, directory, citation_check, job):
     }
 
 
+def write_json_member(archive, name, value):
+    archive.writestr(name, json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+
+
+def write_report_members(archive, prefix, report, evidence):
+    archive.writestr(prefix + "report.md", report_with_evidence(report, evidence))
+    write_json_member(archive, prefix + "evidence.json", evidence)
+
+
+def zip_download(archive, filename):
+    return Response(archive.getvalue(), media_type="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Cache-Control": "no-store",
+    })
+
+
+def suite_comparison_markdown(suite, results):
+    labels = {
+        "report": "报告写入后", "receipt": "工具结果写入后",
+        "evidence": "证据写入后，工具结果提交前",
+        "model_response": "模型响应返回后，写入检查点前",
+    }
+    lines = [
+        "# ResearchDesk 离线恢复对照", "",
+        f"批次 ID `{suite['id']}`", "",
+        "演示使用固定资料和脚本模型。计数按中断前 → 恢复后显示。", "",
+        "| 中断位置 | 模型预算 | 结果 | 模型调用 | 工具调用 | 工具再次执行 | 结果复用 | 台账证据 |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for case, summary in results:
+        before = summary["recovery_demo_before"] or {}
+        metrics = summary["metrics"]
+        prefix = f"runs/{summary['id']}/"
+        outcome = "已完成" if summary["status"] == "completed" else "额度用尽"
+        detail = f"[{outcome}]({prefix}run-summary.json)"
+        if summary["status"] == "completed":
+            detail += f" · [报告]({prefix}report.md)"
+        values = [f"{before.get(key, '—')} → {metrics[key] if metrics[key] is not None else '—'}"
+                  for key in COMPARISON_METRICS]
+        row = [labels[case["boundary"]], str(case["model_limit"]), detail, *values]
+        lines.append("| " + " | ".join(row) + " |")
+    return "\n".join(lines) + "\n"
+
+
 def create_app(output=Path("runs/web"), *, allow_live=False):
     runs = Runs(Path(output), allow_live)
 
@@ -500,6 +571,39 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
     @app.post("/api/recovery-suite/resume", status_code=202)
     def resume_recovery_suite():
         return runs.start_suite(resume=True)
+
+    @app.get("/api/recovery-suite/{suite_id}/review.zip", response_class=Response)
+    def export_recovery_suite(suite_id: str):
+        suite = runs.completed_suite(suite_id)
+        archive = BytesIO()
+        results = []
+        with ZipFile(archive, "w", compression=ZIP_DEFLATED) as bundle:
+            for case in suite["cases"]:
+                run_id = case["run_id"]
+                try:
+                    job = runs.job(run_id)
+                except HTTPException as error:
+                    raise HTTPException(409, "An archived run is missing.") from error
+                directory = child_run_path(runs.research, run_id)
+                record = runs.overview(job)
+                if (record["mode"] != "recovery_demo" or record["status"] != case["outcome"]
+                        or record["model_limit"] != case["model_limit"]
+                        or record["recovery_demo_boundary"] != case["boundary"]
+                        or not record["recovery_demo_injected"] or not record["resume_count"]):
+                    raise HTTPException(409, "The saved run does not match its recovery suite.")
+                prefix = f"runs/{run_id}/"
+                citation_check = None
+                if record["status"] == "completed":
+                    report, evidence = read_completed_report(directory)
+                    write_report_members(bundle, prefix, report, evidence)
+                    citation_check = summarize_citations(report, evidence)
+                summary = build_run_summary(record, directory, citation_check, job)
+                summary["recovery_suite_id"] = suite_id
+                write_json_member(bundle, prefix + "run-summary.json", summary)
+                results.append((case, summary))
+            write_json_member(bundle, "batch.json", {"schema_version": 1, **suite})
+            bundle.writestr("comparison.md", suite_comparison_markdown(suite, results))
+        return zip_download(archive, f"researchdesk-recovery-{suite_id}.zip")
 
     @app.get("/api/recovery-comparison")
     def recovery_comparison():
@@ -576,13 +680,9 @@ def create_app(output=Path("runs/web"), *, allow_live=False):
         summary = build_run_summary(record, directory, summarize_citations(report, citations), job)
         archive = BytesIO()
         with ZipFile(archive, "w", compression=ZIP_DEFLATED) as bundle:
-            bundle.writestr("report.md", report_with_evidence(report, citations))
-            bundle.writestr("evidence.json", json.dumps(citations, ensure_ascii=False, indent=2) + "\n")
-            bundle.writestr("run-summary.json", json.dumps(summary, ensure_ascii=False, indent=2) + "\n")
-        return Response(archive.getvalue(), media_type="application/zip", headers={
-            "Content-Disposition": f'attachment; filename="researchdesk-{run_id}.zip"',
-            "Cache-Control": "no-store",
-        })
+            write_report_members(bundle, "", report, citations)
+            write_json_member(bundle, "run-summary.json", summary)
+        return zip_download(archive, f"researchdesk-{run_id}.zip")
 
     @app.post("/api/runs/{run_id}/resume", status_code=202)
     def resume(run_id: str):

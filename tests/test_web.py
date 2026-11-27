@@ -287,6 +287,8 @@ def test_offline_recovery_suite_continues_after_server_restart(tmp_path, monkeyp
             assert response.status_code == 202
             started = response.json()
             assert started["status"] == "running"
+            review_path = f"/api/recovery-suite/{started['id']}/review.zip"
+            assert client.get(review_path).status_code == 409
             assert client.post("/api/recovery-suite").status_code == 409
             assert client.post("/api/runs", json={"mode": "demo"}).status_code == 409
             assert reached_receipt.wait(90)
@@ -318,9 +320,35 @@ def test_offline_recovery_suite_continues_after_server_restart(tmp_path, monkeyp
             record = restarted.get(f"/api/runs/{row['id']}").json()
             assert record["metrics"]["provider_requests"] == 0 and record["resume_count"] == 1
         assert restarted.post("/api/recovery-suite/resume").status_code == 409
+        response = restarted.get(review_path)
+        assert response.status_code == 200 and response.headers["cache-control"] == "no-store"
+        assert response.headers["content-type"] == "application/zip"
+        with ZipFile(BytesIO(response.content)) as review:
+            assert len(review.namelist()) == 15
+            assert review.testzip() is None
+            assert json.loads(review.read("batch.json")) == {"schema_version": 1, **suite}
+            comparison = review.read("comparison.md").decode()
+            for item in suite["cases"]:
+                prefix = f"runs/{item['run_id']}/"
+                assert prefix + "run-summary.json" in comparison
+                summary = json.loads(review.read(prefix + "run-summary.json"))
+                assert summary.pop("recovery_suite_id") == started["id"]
+                assert summary == restarted.get(f"/api/runs/{item['run_id']}/run-summary.json").json()
+                if item["outcome"] == "completed":
+                    assert prefix + "report.md" in comparison
+                    assert len(json.loads(review.read(prefix + "evidence.json"))) == 1
+                else:
+                    assert prefix + "report.md" not in review.namelist()
+                    assert prefix + "evidence.json" not in review.namelist()
 
     with TestClient(web.create_app(tmp_path), base_url=base_url) as restarted:
         assert restarted.get("/api/runs").json()["recovery_suite"] == suite
+        replacement = restarted.post("/api/recovery-suite")
+        assert replacement.status_code == 202 and replacement.json()["id"] != started["id"]
+        old_review = restarted.get(review_path)
+        assert old_review.status_code == 200
+        with ZipFile(BytesIO(old_review.content)) as review:
+            assert json.loads(review.read("batch.json")) == {"schema_version": 1, **suite}
 
 
 def test_atomic_state_update_retries_windows_reader_conflict(tmp_path, monkeypatch):

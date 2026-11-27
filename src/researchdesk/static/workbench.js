@@ -77,18 +77,22 @@ function syncRunActions() {
   byId("start-recovery-suite").disabled = suiteDisabled;
   byId("resume-recovery-suite").hidden = recoverySuite?.status !== "interrupted";
   byId("resume-recovery-suite").disabled = suiteDisabled;
-  syncDownload("download-summary", "run-summary.json", Boolean(latest));
-  syncDownload("download-report", "report.zip", latest?.status === "completed" && Boolean(latest.report));
+  const runPath = latest ? "/api/runs/" + encodeURIComponent(latest.id) : null;
+  syncDownload("download-summary", runPath && runPath + "/run-summary.json");
+  syncDownload("download-report", latest?.status === "completed" && latest.report ? runPath + "/report.zip" : null);
+  const suitePath = recoverySuite?.status === "completed"
+    ? "/api/recovery-suite/" + encodeURIComponent(recoverySuite.id) + "/review.zip" : null;
+  syncDownload("download-recovery-suite", suitePath);
 }
 
-function syncDownload(elementId, filename, available) {
+function syncDownload(elementId, path) {
   const download = byId(elementId);
-  download.hidden = !available;
+  download.hidden = !path;
   if (download.hidden || !connected) {
     download.removeAttribute("href");
     download.setAttribute("aria-disabled", "true");
   } else {
-    download.href = "/api/runs/" + encodeURIComponent(latest.id) + "/" + filename;
+    download.href = path;
     download.removeAttribute("aria-disabled");
   }
 }
