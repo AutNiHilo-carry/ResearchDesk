@@ -19,10 +19,12 @@ class FinalBodyRejected(RecoveryError):
     pass
 
 
-def policy_spec(max_chars, *, reuse_checked_draft=False):
+def policy_spec(max_chars, *, reuse_checked_draft=False, repair_unknown_citations=False):
     spec = dict(version='final-body-gate-v1', constraint_policy=policy(max_chars), hint_sha256=digest(HINT))
     if reuse_checked_draft:
         spec['overflow_policy'] = 'reuse-checked-draft-v1'
+    if repair_unknown_citations:
+        spec['citation_repair'] = 'unknown-id-v1'
     return spec
 
 
@@ -31,7 +33,8 @@ def manifest_policy(directory):
     spec=json.loads(path.read_text(encoding='utf-8')).get('final_body_policy') if path.is_file() else None
     if spec is not None:
         try: valid=spec==policy_spec(spec['constraint_policy']['max_chars'],
-                                    reuse_checked_draft=spec.get('overflow_policy')=='reuse-checked-draft-v1')
+                                    reuse_checked_draft=spec.get('overflow_policy')=='reuse-checked-draft-v1',
+                                    repair_unknown_citations=spec.get('citation_repair')=='unknown-id-v1')
         except (TypeError,KeyError,ValueError): valid=False
         if not valid: raise RecoveryError('Invalid final body policy.')
     return spec

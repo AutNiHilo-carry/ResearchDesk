@@ -16,7 +16,8 @@ from .model_budget import ModelBudgetExceeded, VERSION as MODEL_POLICY_VERSION
 from .report_policy import policy_spec
 from .search_context import policy_spec as search_context_spec,verify_completed_policy
 from .draft_inspection import policy_spec as draft_inspection_spec, verify_completed_policy as verify_completed_inspection
-from .final_body_gate import policy_spec as final_body_spec,bind_policy as bind_final_body,verify_completed as verify_final_body
+from .final_body_gate import (FinalBodyRejected, policy_spec as final_body_spec,
+                              bind_policy as bind_final_body, verify_completed as verify_final_body)
 
 POLICY_OPTIONS = {"max_calls": "max_tool_calls", "max_provider_requests": "max_provider_requests",
                   "timeout_seconds": "tool_timeout", "max_retries": "tool_retries",
@@ -47,6 +48,8 @@ def main(argv=None, *, model_name=None, run_id=None):
     parser.add_argument('--draft-inspection-final-turn', action='store_true',
                         help='Use the last budgeted model turn to write the report without tools')
     parser.add_argument('--final-body-limit',type=int,help='Opt-in final publication length and citation-structure gate')
+    parser.add_argument('--repair-unknown-citations', action='store_true',
+                        help='Spend at most one remaining model call to replace unregistered final citation IDs')
     parser.add_argument('--reuse-checked-draft-on-overflow', action='store_true',
                         help='Publish the latest valid inspected draft when the final candidate only exceeds its length limit')
     parser.add_argument('--search-context',choices=['full','preview'],help='search tool response presentation; default full')
@@ -72,6 +75,9 @@ def main(argv=None, *, model_name=None, run_id=None):
         try: final_body_spec(args.final_body_limit)
         except ValueError: parser.error('--final-body-limit must be 1..100000')
         if args.resume or args.demo: parser.error('Final body gate is only configured on new live runs.')
+    if args.repair_unknown_citations and (args.resume or args.demo or args.final_body_limit is None
+                                         or not args.max_model_calls):
+        parser.error('--repair-unknown-citations requires a new live run with --final-body-limit and a positive --max-model-calls')
     if args.reuse_checked_draft_on_overflow and (args.resume or args.demo or args.final_body_limit is None
                                                 or args.draft_inspection_limit is None):
         parser.error('--reuse-checked-draft-on-overflow requires a new live run with both draft and final body limits')
@@ -163,7 +169,8 @@ def main(argv=None, *, model_name=None, run_id=None):
                     metadata['allowed_tools'].append('inspect_report')
             if args.final_body_limit is not None:
                 metadata['final_body_policy'] = final_body_spec(
-                    args.final_body_limit, reuse_checked_draft=args.reuse_checked_draft_on_overflow)
+                    args.final_body_limit, reuse_checked_draft=args.reuse_checked_draft_on_overflow,
+                    repair_unknown_citations=args.repair_unknown_citations)
             atomic_text(directory / "run.json", json.dumps(metadata, ensure_ascii=False, indent=2))
             documents = []
             for path in args.document:
@@ -199,7 +206,14 @@ def main(argv=None, *, model_name=None, run_id=None):
                 content = "\n".join(block.get("text", "") for block in content if isinstance(block, dict))
             from .final_body_gate import select_body
             selected, selection = select_body(ledger, content)
-            report_path = ledger.save_report(selected)
+            try:
+                report_path = ledger.save_report(selected)
+            except FinalBodyRejected:
+                from .citation_repair import repair_unknown_ids
+                repaired = repair_unknown_ids(ledger, selected, metadata['model'])
+                if repaired is None:
+                    raise
+                report_path = ledger.save_report(repaired)
             if selection is not None:
                 metadata['overflow_selection'] = selection
         metadata.update(status="completed", finished_at=now(), report=str(report_path))
